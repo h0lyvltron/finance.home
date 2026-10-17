@@ -73,6 +73,26 @@ func firstExpenseCat(t *testing.T, s *store.Store) int64 {
 	return 0
 }
 
+func firstIncomeCat(t *testing.T, s *store.Store) int64 {
+	t.Helper()
+	cats, err := s.ListCategories("income", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cats {
+		if c.ParentID != nil && !c.Protected {
+			return c.ID
+		}
+	}
+	for _, c := range cats {
+		if !c.Protected {
+			return c.ID
+		}
+	}
+	t.Fatal("no income category")
+	return 0
+}
+
 func TestImportRoundTrip(t *testing.T) {
 	s := setupStore(t)
 	acctID := ensureChecking(t, s)

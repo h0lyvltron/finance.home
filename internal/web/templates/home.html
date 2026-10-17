@@ -112,10 +112,12 @@
     <div class="panel">
       <div class="spread">
         <h2 style="margin:0">Net worth</h2>
-        <a class="btn btn-sm btn-ghost" href="/accounts">Accounts</a>
+        <a class="btn btn-sm btn-ghost" href="/reports/networth">History</a>
       </div>
       <p class="report-total" style="margin:.5rem 0 0">{{money .NetWorth .Currency}}</p>
       <p class="tiny muted">Across {{len .Accounts}} account{{if ne (len .Accounts) 1}}s{{end}}
+        · <a href="/goals">Goals</a>
+        · <a href="/recap">Money date</a>
         {{if .ReviewCount}} · <a href="/review">{{.ReviewCount}} need review</a>{{end}}
       </p>
     </div>

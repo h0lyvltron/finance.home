@@ -272,3 +272,81 @@ type RecurringSuggestion struct {
 	CategoryID  *int64
 	AccountID   *int64
 }
+
+// Goal is a savings target or debt payoff tracker (no APR math).
+type Goal struct {
+	ID             int64
+	Kind           string // savings | debt
+	Name           string
+	TargetCents    int64
+	TargetDate     string // YYYY-MM-DD or empty
+	PaceWindowDays int
+	Archived       bool
+	AccountIDs     []int64
+	AccountNames   []string
+}
+
+// GoalProgress is computed progress for a goal.
+type GoalProgress struct {
+	Goal             Goal
+	CurrentCents     int64 // savings: linked balances; debt: outstanding (positive owed)
+	StartWindowCents int64 // balance at start of pace window
+	DeltaWindowCents int64 // change over pace window (savings: up good; debt: down good)
+	Pct              float64
+	OnTrack          bool
+	Behind           bool
+	WeeklyCatchUp    int64 // positive cents/week when behind (savings contribute / debt pay)
+	DaysLeft         int
+	WeeksLeft        int
+	NeededPerWeek    int64 // required pace to hit date
+	RecentPerWeek    int64 // observed pace over window
+	MilestoneHit     bool  // crossed 25/50/75/100 recently
+}
+
+type BalancePoint struct {
+	Date   string
+	Label  string
+	Amount int64 // net worth or account balance (NW-oriented)
+}
+
+type AccountSeries struct {
+	AccountID   int64
+	AccountName string
+	AccountType string
+	Points      []BalancePoint
+}
+
+type NetWorthSeries struct {
+	Points   []BalancePoint
+	Accounts []AccountSeries
+	Start    int64
+	End      int64
+	Change   int64
+}
+
+type SavingsRateReport struct {
+	Income         int64
+	Expense        int64
+	Saved          int64 // income - expense
+	RatePct        float64
+	TargetCents    int64 // household monthly savings target (scaled to range when possible)
+	TargetRatePct  float64
+	HasTarget      bool
+	VsTargetCents  int64 // Saved - TargetCents
+	YearMonth      string
+}
+
+type MonthlyRecap struct {
+	YearMonth       string
+	Label           string
+	Budgeted        int64
+	Spent           int64
+	BudgetRemaining int64
+	SavingsRate     SavingsRateReport
+	NetWorthStart   int64
+	NetWorthEnd     int64
+	NetWorthChange  int64
+	Goals           []GoalProgress
+	Wins            []CoachingInsight // up to 2
+	Watch           *CoachingInsight  // one watch item
+}

@@ -7,7 +7,7 @@ import (
 	"finance.home/internal/models"
 )
 
-// HomeInsights returns up to max insights: pace, review, bills, plus a positive when possible.
+// HomeInsights returns up to max insights: actionable warns + one positive counterpart.
 // Partner-comparison insights are off.
 func (s *Store) HomeInsights(h *models.Household, now time.Time, max int) ([]models.CoachingInsight, error) {
 	if max <= 0 {
@@ -16,17 +16,11 @@ func (s *Store) HomeInsights(h *models.Household, now time.Time, max int) ([]mod
 	ym := YearMonth(h, now)
 	_ = s.EnsureScheduleInstances(localize(h, now), 45)
 
-	var out []models.CoachingInsight
 	var warn []models.CoachingInsight
 	var positive *models.CoachingInsight
 
-	if pace := s.PaceInsight(h, ym, now); pace != nil {
-		if pace.Tone == "warn" {
-			warn = append(warn, *pace)
-		} else {
-			// Keep pace info as candidate; may drop if we need room for review/bills
-			warn = append(warn, *pace)
-		}
+	if pace := s.PaceInsight(h, ym, now); pace != nil && pace.Tone == "warn" {
+		warn = append(warn, *pace)
 	}
 
 	if n, err := s.NeedsReviewCount(); err == nil && n > 0 {
@@ -65,7 +59,31 @@ func (s *Store) HomeInsights(h *models.Household, now time.Time, max int) ([]mod
 		})
 	}
 
+	if g := s.GoalBehindInsight(now); g != nil {
+		warn = append(warn, *g)
+	}
+	if spike := s.SpendSpikeInsight(h, ym, now); spike != nil {
+		warn = append(warn, *spike)
+	}
+	if card := s.CardBalanceRiseInsight(h, ym, now); card != nil && card.Tone == "warn" {
+		warn = append(warn, *card)
+	}
+
 	positive = s.PositiveBudgetInsight(ym)
+	if positive == nil {
+		positive = s.GoalMilestoneInsight(now)
+	}
+	if positive == nil {
+		if card := s.CardBalanceRiseInsight(h, ym, now); card != nil && card.Tone == "ok" {
+			positive = card
+		}
+	}
+	if positive == nil {
+		if pace := s.PaceInsight(h, ym, now); pace != nil && pace.Tone != "warn" {
+			// Don't use info pace as the positive slot unless nothing else
+			positive = s.PositiveBudgetInsight(ym)
+		}
+	}
 	if positive == nil {
 		positive = &models.CoachingInsight{
 			Kind:   "positive",
@@ -81,6 +99,7 @@ func (s *Store) HomeInsights(h *models.Household, now time.Time, max int) ([]mod
 	if room < 0 {
 		room = 0
 	}
+	var out []models.CoachingInsight
 	for _, w := range warn {
 		if len(out) >= room {
 			break
@@ -101,6 +120,196 @@ func plural(n int) string {
 	return "s"
 }
 
+// GoalBehindInsight returns the worst behind goal with weekly catch-up coaching.
+func (s *Store) GoalBehindInsight(now time.Time) *models.CoachingInsight {
+	progress, err := s.ListGoalProgress(now)
+	if err != nil {
+		return nil
+	}
+	var best *models.GoalProgress
+	for i := range progress {
+		p := &progress[i]
+		if !p.Behind || p.WeeklyCatchUp <= 0 {
+			continue
+		}
+		if best == nil || p.WeeklyCatchUp > best.WeeklyCatchUp {
+			best = p
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	verb := "save"
+	if best.Goal.Kind == "debt" {
+		verb = "pay"
+	}
+	return &models.CoachingInsight{
+		Kind:    "goal",
+		Tone:    "warn",
+		Title:   best.Goal.Name + " needs a catch-up",
+		Detail:  fmt.Sprintf("%s %s / week to get back on track", verb, formatRough(best.WeeklyCatchUp)),
+		Href:    "/goals",
+		Amount:  best.WeeklyCatchUp,
+		ShowAmt: true,
+	}
+}
+
+// GoalMilestoneInsight celebrates a recent milestone.
+func (s *Store) GoalMilestoneInsight(now time.Time) *models.CoachingInsight {
+	progress, err := s.ListGoalProgress(now)
+	if err != nil {
+		return nil
+	}
+	for _, p := range progress {
+		if p.MilestoneHit {
+			return &models.CoachingInsight{
+				Kind:    "positive",
+				Tone:    "ok",
+				Title:   p.Goal.Name + " milestone",
+				Detail:  fmt.Sprintf("%.0f%% of the way — keep it going", p.Pct),
+				Href:    "/goals",
+				Amount:  p.CurrentCents,
+				ShowAmt: true,
+			}
+		}
+		if p.OnTrack && p.Goal.Kind == "savings" && p.Pct >= 100 {
+			return &models.CoachingInsight{
+				Kind:   "positive",
+				Tone:   "ok",
+				Title:  p.Goal.Name + " reached",
+				Detail: "Target hit — nice work.",
+				Href:   "/goals",
+			}
+		}
+	}
+	return nil
+}
+
+// SpendSpikeInsight flags a flexible category spending ≥2× its typical daily pace mid-month.
+func (s *Store) SpendSpikeInsight(h *models.Household, ym string, now time.Time) *models.CoachingInsight {
+	lines, err := s.MonthBudgetLines(ym)
+	if err != nil {
+		return nil
+	}
+	now = localize(h, now)
+	day := now.Day()
+	if day < 5 {
+		return nil // too early
+	}
+	daysInMonth := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, now.Location()).Day()
+	expectedFrac := float64(day) / float64(daysInMonth)
+
+	var worst *models.BudgetLine
+	var worstRatio float64
+	for i := range lines {
+		ln := &lines[i]
+		if ln.HasChildren || ln.AmountCents <= 0 || ln.FixedFlexible == "fixed" {
+			continue
+		}
+		expected := float64(ln.AmountCents) * expectedFrac
+		if expected <= 0 {
+			continue
+		}
+		ratio := float64(ln.SpentCents) / expected
+		// Spike: ≥2× expected pace and at least $50 over expected
+		if ratio >= 2.0 && float64(ln.SpentCents)-expected >= 5000 {
+			if worst == nil || ratio > worstRatio {
+				worst = ln
+				worstRatio = ratio
+			}
+		}
+	}
+	if worst == nil {
+		return nil
+	}
+	return &models.CoachingInsight{
+		Kind:    "spike",
+		Tone:    "warn",
+		Title:   worst.CategoryName + " spending spike",
+		Detail:  fmt.Sprintf("%.0f× expected pace this month", worstRatio),
+		Href:    fmt.Sprintf("/transactions?preset=this_month&category=%d", worst.CategoryID),
+		Amount:  worst.SpentCents,
+		ShowAmt: true,
+	}
+}
+
+// CardBalanceRiseInsight warns when credit card outstanding rose this month; celebrates when it fell.
+func (s *Store) CardBalanceRiseInsight(h *models.Household, ym string, now time.Time) *models.CoachingInsight {
+	from, to, err := monthBounds(ym)
+	if err != nil {
+		return nil
+	}
+	end := to
+	loc := localize(h, now)
+	if ym == YearMonth(h, now) {
+		end = loc.Format("2006-01-02")
+	}
+	accts, err := s.ListAccounts(false)
+	if err != nil {
+		return nil
+	}
+	var worstRise int64
+	var bestDrop int64
+	var riseName, dropName string
+	var riseID, dropID int64
+	for _, a := range accts {
+		if a.Type != "credit" {
+			continue
+		}
+		startBal, err := s.AccountBalanceAsOf(a.ID, from)
+		if err != nil {
+			continue
+		}
+		endBal, err := s.AccountBalanceAsOf(a.ID, end)
+		if err != nil {
+			continue
+		}
+		// NW-oriented: more negative = higher card balance owed
+		startOwed := -startBal
+		endOwed := -endBal
+		if startOwed < 0 {
+			startOwed = 0
+		}
+		if endOwed < 0 {
+			endOwed = 0
+		}
+		delta := endOwed - startOwed
+		if delta > 2500 && delta > worstRise { // > $25
+			worstRise = delta
+			riseName = a.Name
+			riseID = a.ID
+		}
+		if delta < -2500 && -delta > bestDrop {
+			bestDrop = -delta
+			dropName = a.Name
+			dropID = a.ID
+		}
+	}
+	if worstRise > 0 {
+		return &models.CoachingInsight{
+			Kind:    "card",
+			Tone:    "warn",
+			Title:   riseName + " balance up",
+			Detail:  fmt.Sprintf("%s higher than month start", formatRough(worstRise)),
+			Href:    fmt.Sprintf("/accounts/%d", riseID),
+			Amount:  worstRise,
+			ShowAmt: true,
+		}
+	}
+	if bestDrop > 0 {
+		return &models.CoachingInsight{
+			Kind:    "positive",
+			Tone:    "ok",
+			Title:   dropName + " balance down",
+			Detail:  fmt.Sprintf("Paid down %s this month", formatRough(bestDrop)),
+			Href:    fmt.Sprintf("/accounts/%d", dropID),
+			Amount:  bestDrop,
+			ShowAmt: true,
+		}
+	}
+	return nil
+}
+
 // HomeDashboard assembles curated Home widgets.
 type HomeDashboard struct {
 	LeftToSpend  models.LeftToSpend
@@ -110,6 +319,7 @@ type HomeDashboard struct {
 	NetWorth     int64
 	ReviewCount  int
 	YearMonth    string
+	Goals        []models.GoalProgress
 }
 
 func (s *Store) BuildHomeDashboard(h *models.Household, now time.Time) (HomeDashboard, error) {
@@ -143,5 +353,7 @@ func (s *Store) BuildHomeDashboard(h *models.Household, now time.Time) (HomeDash
 		d.NetWorth += a.Balance
 	}
 	d.ReviewCount, _ = s.NeedsReviewCount()
+	goals, _ := s.ListGoalProgress(now)
+	d.Goals = goals
 	return d, nil
 }

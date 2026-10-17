@@ -1,0 +1,148 @@
+{{define "goals"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Goals — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Goals</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Savings targets and debt balance over time. Pace uses a rolling window; catch-up is weekly $ when behind.</p>
+    </div>
+    <a class="btn btn-sm btn-ghost" href="/recap">Money date</a>
+  </div>
+
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+  {{if .GoalProgress}}
+  <div class="stack" style="gap:.75rem">
+    {{range .GoalProgress}}
+    <div class="panel">
+      <div class="spread">
+        <div>
+          <div class="tiny faint">{{if eq .Goal.Kind "debt"}}Debt{{else}}Savings{{end}}</div>
+          <h2 style="margin:.15rem 0">{{.Goal.Name}}</h2>
+          <div class="tiny muted">
+            {{range $i, $n := .Goal.AccountNames}}{{if $i}}, {{end}}{{$n}}{{end}}
+            · {{.Goal.PaceWindowDays}}d pace
+            {{if .Goal.TargetDate}} · by {{.Goal.TargetDate}}{{end}}
+          </div>
+        </div>
+        <div style="text-align:right">
+          {{if eq .Goal.Kind "debt"}}
+          <div class="report-total">{{money .CurrentCents $.Currency}}</div>
+          <div class="tiny muted">owed · target {{money .Goal.TargetCents $.Currency}}</div>
+          {{else}}
+          <div class="report-total">{{money .CurrentCents $.Currency}}</div>
+          <div class="tiny muted">of {{money .Goal.TargetCents $.Currency}} · {{printf "%.0f" .Pct}}%</div>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="health-grid" style="margin-top:.75rem">
+        <div>
+          <div class="tiny faint">Window Δ</div>
+          <div class="num-strong {{if eq .Goal.Kind "debt"}}{{if gt .DeltaWindowCents 0}}pos{{else if lt .DeltaWindowCents 0}}neg{{end}}{{else}}{{if gt .DeltaWindowCents 0}}pos{{else if lt .DeltaWindowCents 0}}neg{{end}}{{end}}">{{money .DeltaWindowCents $.Currency}}</div>
+        </div>
+        <div>
+          <div class="tiny faint">Recent / wk</div>
+          <div class="num-strong">{{money .RecentPerWeek $.Currency}}</div>
+        </div>
+        <div>
+          <div class="tiny faint">{{if and .Behind (gt .WeeklyCatchUp 0)}}Catch-up / wk{{else}}Needed / wk{{end}}</div>
+          <div class="num-strong {{if and .Behind (gt .WeeklyCatchUp 0)}}neg{{end}}">
+            {{if and .Behind (gt .WeeklyCatchUp 0)}}{{money .WeeklyCatchUp $.Currency}}{{else if gt .NeededPerWeek 0}}{{money .NeededPerWeek $.Currency}}{{else}}—{{end}}
+          </div>
+        </div>
+      </div>
+
+      {{if .Behind}}
+      <p class="insight insight-warn" style="margin:.75rem 0 0;display:block">
+        <span class="insight-title">Behind pace</span>
+        <span class="tiny muted"> — aim for {{money .WeeklyCatchUp $.Currency}} / week to catch up{{if .Goal.TargetDate}} by {{.Goal.TargetDate}}{{end}}.</span>
+      </p>
+      {{else if .OnTrack}}
+      <p class="tiny muted" style="margin:.75rem 0 0">On track{{if .MilestoneHit}} · recent milestone{{end}}.</p>
+      {{end}}
+
+      <form method="post" action="/goals/{{.Goal.ID}}/archive" style="margin-top:.75rem">
+        {{template "csrf" $}}
+        <button class="btn btn-sm btn-ghost" type="submit">Archive</button>
+      </form>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="panel"><p class="muted" style="margin:0">No goals yet. Add a savings target or debt tracker below.</p></div>
+  {{end}}
+
+  {{if .ShowChart}}
+  <div class="panel chart-panel" style="margin-top:1rem" data-chart>
+    <div class="spread">
+      <h2 style="margin:0">{{.DebtGoalName}} — balance over time</h2>
+      <span class="tiny faint">Last 90 days</span>
+    </div>
+    <div class="chart-wrap" style="margin-top:.75rem"><canvas aria-label="Debt balance chart"></canvas></div>
+    <script type="application/json">{{.ChartJSON}}</script>
+  </div>
+  {{end}}
+
+  <form method="post" action="/goals" class="panel stack" style="margin-top:1.25rem">
+    {{template "csrf" .}}
+    <h2 style="margin:0">Add goal</h2>
+    <div class="field">
+      <label for="kind">Type</label>
+      <select id="kind" name="kind">
+        <option value="savings">Savings</option>
+        <option value="debt">Debt (balance chart)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" required maxlength="80" placeholder="Emergency fund">
+    </div>
+    <div class="row" style="align-items:flex-end">
+      <div class="field grow">
+        <label for="target">Target amount</label>
+        <input id="target" name="target" inputmode="decimal" placeholder="10000.00" required>
+      </div>
+      <div class="field grow">
+        <label for="target_date">Target date (optional)</label>
+        <input id="target_date" type="date" name="target_date">
+      </div>
+    </div>
+    <div class="field">
+      <label for="pace_window">Pace window (days)</label>
+      <input id="pace_window" name="pace_window" type="number" min="7" max="365" value="90">
+    </div>
+    <div class="field">
+      <label>Linked accounts</label>
+      <div class="stack" style="gap:.35rem;margin-top:.35rem">
+        {{range .Accounts}}
+        <label class="row" style="gap:.5rem;align-items:center">
+          <input type="checkbox" name="account_id" value="{{.ID}}">
+          <span>{{.Name}} <span class="tiny muted">({{.Type}} · {{money .Balance $.Currency}})</span></span>
+        </label>
+        {{end}}
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save goal</button>
+  </form>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

@@ -215,5 +215,8 @@
   <a class="chip {{if eq .NavReport "explore"}}chip-ok{{end}}" href="/explore?{{.Filter.QueryString}}">Spending</a>
   <a class="chip {{if eq .NavReport "cashflow"}}chip-ok{{end}}" href="/reports/cashflow?{{.Filter.QueryString}}">Cash flow</a>
   <a class="chip {{if eq .NavReport "pivot"}}chip-ok{{end}}" href="/reports/pivot?{{.Filter.QueryString}}">Pivot</a>
+  <a class="chip {{if eq .NavReport "networth"}}chip-ok{{end}}" href="/reports/networth?{{.Filter.QueryString}}">Net worth</a>
+  <a class="chip {{if eq .NavReport "budget"}}chip-ok{{end}}" href="/reports/budget">Budget</a>
+  <a class="chip {{if eq .NavReport "savings"}}chip-ok{{end}}" href="/reports/savings?{{.Filter.QueryString}}">Savings</a>
 </nav>
 {{end}}

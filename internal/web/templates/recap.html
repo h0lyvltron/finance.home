@@ -1,0 +1,144 @@
+{{define "recap"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Money date — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Money date</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Monthly recap — one screen for the household.</p>
+    </div>
+    <form method="get" action="/recap" class="row" style="align-items:center;gap:.5rem">
+      <input type="month" name="month" value="{{.YearMonth}}" onchange="this.form.submit()">
+    </form>
+  </div>
+
+  {{with .MonthlyRecap}}
+  <section class="stack home-curated">
+    <div class="home-hero">
+      <p class="tiny faint">{{.Label}}</p>
+      <h2 class="home-lts" style="font-size:1.6rem;margin:.25rem 0">Spend vs budget</h2>
+      <p class="report-total {{if lt .BudgetRemaining 0}}neg{{else}}pos{{end}}" style="margin:0">
+        {{money .Spent $.Currency}} <span class="muted" style="font-size:.85rem;font-weight:500">of {{money .Budgeted $.Currency}}</span>
+      </p>
+      <p class="muted small" style="margin:.35rem 0 0">
+        {{if lt .BudgetRemaining 0}}{{moneyAbs .BudgetRemaining $.Currency}} over{{else}}{{money .BudgetRemaining $.Currency}} left{{end}}
+        · <a href="/reports/budget?month={{.YearMonth}}">Budget report</a>
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin:0 0 .5rem">Savings rate</h2>
+      <div class="health-grid">
+        <div>
+          <div class="tiny faint">Rate</div>
+          <div class="num-strong">{{printf "%.0f" .SavingsRate.RatePct}}%</div>
+        </div>
+        <div>
+          <div class="tiny faint">Saved</div>
+          <div class="num-strong {{if lt .SavingsRate.Saved 0}}neg{{else}}pos{{end}}">{{money .SavingsRate.Saved $.Currency}}</div>
+        </div>
+        {{if .SavingsRate.HasTarget}}
+        <div>
+          <div class="tiny faint">vs target</div>
+          <div class="num-strong {{if lt .SavingsRate.VsTargetCents 0}}neg{{else}}pos{{end}}">{{money .SavingsRate.VsTargetCents $.Currency}}</div>
+        </div>
+        {{end}}
+      </div>
+      <p class="tiny muted" style="margin:.5rem 0 0">
+        Income {{money .SavingsRate.Income $.Currency}} − expense {{moneyAbs .SavingsRate.Expense $.Currency}}
+        {{if .SavingsRate.HasTarget}} · plan {{money .SavingsRate.TargetCents $.Currency}}{{end}}
+        · <a href="/reports/savings">Full report</a>
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin:0 0 .5rem">Net worth</h2>
+      <div class="health-grid">
+        <div>
+          <div class="tiny faint">Start</div>
+          <div class="num-strong">{{money .NetWorthStart $.Currency}}</div>
+        </div>
+        <div>
+          <div class="tiny faint">Now</div>
+          <div class="num-strong">{{money .NetWorthEnd $.Currency}}</div>
+        </div>
+        <div>
+          <div class="tiny faint">Change</div>
+          <div class="num-strong {{if lt .NetWorthChange 0}}neg{{else}}pos{{end}}">{{money .NetWorthChange $.Currency}}</div>
+        </div>
+      </div>
+      <p class="tiny muted" style="margin:.5rem 0 0"><a href="/reports/networth">Balances over time</a></p>
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <h2 style="margin:0">Goals</h2>
+        <a class="btn btn-sm btn-ghost" href="/goals">Manage</a>
+      </div>
+      {{if not .Goals}}
+      <p class="muted small" style="margin:.75rem 0 0">No active goals.</p>
+      {{else}}
+        {{range .Goals}}
+        <div class="list-row">
+          <div>
+            <div style="font-weight:600">{{.Goal.Name}}</div>
+            <div class="tiny muted">
+              {{if eq .Goal.Kind "debt"}}{{money .CurrentCents $.Currency}} owed{{else}}{{printf "%.0f" .Pct}}% · {{money .CurrentCents $.Currency}}{{end}}
+              {{if .Behind}} · catch-up {{money .WeeklyCatchUp $.Currency}}/wk{{end}}
+            </div>
+          </div>
+          <span class="chip {{if .Behind}}chip-warn{{else if .OnTrack}}chip-ok{{end}}">{{if .Behind}}behind{{else if .OnTrack}}on track{{else}}—{{end}}</span>
+        </div>
+        {{end}}
+      {{end}}
+    </div>
+
+    <div class="panel insights-panel">
+      <h2 style="margin:0 0 .5rem">Two wins</h2>
+      {{if not .Wins}}
+      <p class="muted small">No standout wins this month — steady is fine.</p>
+      {{else}}
+        {{range .Wins}}
+        <a class="insight insight-{{.Tone}}" href="{{.Href}}">
+          <div>
+            <div class="insight-title">{{.Title}}</div>
+            <div class="tiny muted">{{.Detail}}</div>
+          </div>
+          <span class="faint">›</span>
+        </a>
+        {{end}}
+      {{end}}
+    </div>
+
+    {{if .Watch}}
+    <div class="panel insights-panel">
+      <h2 style="margin:0 0 .5rem">One watch</h2>
+      <a class="insight insight-{{.Watch.Tone}}" href="{{.Watch.Href}}">
+        <div>
+          <div class="insight-title">{{.Watch.Title}}</div>
+          <div class="tiny muted">{{.Watch.Detail}}</div>
+        </div>
+        <span class="faint">›</span>
+      </a>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

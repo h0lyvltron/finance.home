@@ -96,6 +96,13 @@ type pageData struct {
 	Schedules    []models.ScheduleTemplate
 	Suggestions  []models.RecurringSuggestion
 	Insights     []models.CoachingInsight
+	// goals / depth reports / recap (slice 5)
+	GoalProgress   []models.GoalProgress
+	DebtSeries     []models.BalancePoint
+	DebtGoalName   string
+	NetWorthSeries models.NetWorthSeries
+	SavingsRate    models.SavingsRateReport
+	MonthlyRecap   models.MonthlyRecap
 }
 
 type reconcileResult struct {
@@ -181,6 +188,14 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /explore", a.requireAuth(a.explorePage))
 	mux.HandleFunc("GET /reports/cashflow", a.requireAuth(a.cashflowPage))
 	mux.HandleFunc("GET /reports/pivot", a.requireAuth(a.pivotPage))
+	mux.HandleFunc("GET /reports/networth", a.requireAuth(a.networthPage))
+	mux.HandleFunc("GET /reports/budget", a.requireAuth(a.budgetReportPage))
+	mux.HandleFunc("GET /reports/savings", a.requireAuth(a.savingsRatePage))
+	mux.HandleFunc("GET /goals", a.requireAuth(a.goalsPage))
+	mux.HandleFunc("POST /goals", a.requireAuth(a.csrf(a.goalCreate)))
+	mux.HandleFunc("POST /goals/{id}", a.requireAuth(a.csrf(a.goalUpdate)))
+	mux.HandleFunc("POST /goals/{id}/archive", a.requireAuth(a.csrf(a.goalArchive)))
+	mux.HandleFunc("GET /recap", a.requireAuth(a.recapPage))
 	mux.HandleFunc("POST /filters/save", a.requireAuth(a.csrf(a.saveFilterPost)))
 	mux.HandleFunc("POST /filters/saved/{id}/delete", a.requireAuth(a.csrf(a.deleteSavedFilter)))
 

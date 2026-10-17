@@ -305,3 +305,219 @@
 </body>
 </html>
 {{end}}
+
+{{define "networth"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Net worth — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Net worth</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Household and account balances reconstructed over time.</p>
+    </div>
+  </div>
+
+  {{template "report-nav" dict "NavReport" "networth" "Filter" .Filter}}
+
+  <div class="explore-grid">
+    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
+    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+
+    <div class="stack explore-main">
+      <div class="panel report-totals totals-row">
+        <div><div class="tiny muted">Start</div><div class="report-total">{{money .NetWorthSeries.Start .Currency}}</div></div>
+        <div><div class="tiny muted">End</div><div class="report-total">{{money .NetWorthSeries.End .Currency}}</div></div>
+        <div><div class="tiny muted">Change</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+      </div>
+
+      {{if .ShowChart}}
+      <div class="panel chart-panel" data-chart>
+        <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Net worth chart"></canvas></div>
+        <script type="application/json">{{.ChartJSON}}</script>
+      </div>
+      {{end}}
+
+      <div class="panel">
+        <h2 style="margin-top:0">Accounts</h2>
+        {{if not .NetWorthSeries.Accounts}}
+        <p class="muted">No accounts.</p>
+        {{else}}
+        <div class="table-list">
+          {{range .NetWorthSeries.Accounts}}
+          {{$n := len .Points}}
+          <div class="list-row">
+            <div>
+              <div style="font-weight:600">{{.AccountName}}</div>
+              <div class="tiny muted">{{.AccountType}}</div>
+            </div>
+            <div class="tx-amount">
+              {{if $n}}{{$last := index .Points (sub $n 1)}}{{money $last.Amount $.Currency}}{{end}}
+            </div>
+          </div>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
+
+{{define "budget-report"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Budget vs actual — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Budget vs actual</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Category targets against spend for the month.</p>
+    </div>
+    <form method="get" action="/reports/budget">
+      <input type="month" name="month" value="{{.YearMonth}}" onchange="this.form.submit()">
+    </form>
+  </div>
+
+  {{template "report-nav" dict "NavReport" "budget" "Filter" .Filter}}
+
+  <div class="stack explore-main" style="margin-top:1rem">
+    <div class="panel report-totals totals-row">
+      <div><div class="tiny muted">Budgeted</div><div class="report-total">{{money .BudgetHealth.Budgeted .Currency}}</div></div>
+      <div><div class="tiny muted">Spent</div><div class="report-total">{{money .BudgetHealth.Spent .Currency}}</div></div>
+      <div><div class="tiny muted">Over</div><div class="report-total {{if gt .BudgetHealth.OverCents 0}}neg{{end}}">{{money .BudgetHealth.OverCents .Currency}}</div></div>
+    </div>
+
+    {{if .ShowChart}}
+    <div class="panel chart-panel" data-chart>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Budget vs actual"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
+    {{end}}
+
+    <div class="panel">
+      <h2 style="margin-top:0">Categories</h2>
+      {{if not .BudgetLines}}
+      <p class="muted">No budgets for this month. Set them on <a href="/plan?month={{.YearMonth}}">Plan</a>.</p>
+      {{else}}
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Category</th><th>Budget</th><th>Spent</th><th>Left</th></tr></thead>
+          <tbody>
+          {{range .BudgetLines}}
+          {{if or (gt .AmountCents 0) (gt .SpentCents 0)}}
+          <tr>
+            <td>{{if .ParentName}}{{.ParentName}} › {{end}}{{.CategoryName}}{{if .HasChildren}} <span class="tiny faint">(rollup)</span>{{end}}</td>
+            <td class="num">{{money .AmountCents $.Currency}}</td>
+            <td class="num">{{money .SpentCents $.Currency}}</td>
+            <td class="num {{if lt .Remaining 0}}neg{{else}}pos{{end}}">{{money .Remaining $.Currency}}</td>
+          </tr>
+          {{end}}
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
+
+{{define "savings-rate"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Savings rate — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Savings rate</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Income kept after expenses{{if .SavingsRate.HasTarget}}, vs household monthly target{{end}}.</p>
+    </div>
+  </div>
+
+  {{template "report-nav" dict "NavReport" "savings" "Filter" .Filter}}
+
+  <div class="explore-grid">
+    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
+    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+
+    <div class="stack explore-main">
+      <div class="panel report-totals totals-row">
+        <div><div class="tiny muted">Rate</div><div class="report-total">{{printf "%.0f" .SavingsRate.RatePct}}%</div></div>
+        <div><div class="tiny muted">Saved</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+        {{if .SavingsRate.HasTarget}}
+        <div><div class="tiny muted">vs target</div><div class="report-total {{if lt .SavingsRate.VsTargetCents 0}}neg{{else}}pos{{end}}">{{money .SavingsRate.VsTargetCents .Currency}}</div></div>
+        {{end}}
+      </div>
+
+      <div class="panel chart-panel" data-chart>
+        <div class="chart-wrap"><canvas aria-label="Savings rate chart"></canvas></div>
+        <script type="application/json">{{.ChartJSON}}</script>
+      </div>
+
+      <div class="panel">
+        <div class="health-grid">
+          <div><div class="tiny faint">Income</div><div class="num-strong pos">{{money .IncomeTotal .Currency}}</div></div>
+          <div><div class="tiny faint">Expense</div><div class="num-strong neg">{{moneyAbs .ExpenseTotal .Currency}}</div></div>
+          {{if .SavingsRate.HasTarget}}
+          <div><div class="tiny faint">Target ({{printf "%.0f" .SavingsRate.TargetRatePct}}%)</div><div class="num-strong">{{money .SavingsRate.TargetCents .Currency}}</div></div>
+          {{else}}
+          <div><div class="tiny faint">Tip</div><div class="tiny muted">Set a savings contribution on <a href="/plan">Plan</a> to compare.</div></div>
+          {{end}}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
