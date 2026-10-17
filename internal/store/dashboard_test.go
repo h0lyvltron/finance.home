@@ -121,6 +121,36 @@ func TestMoveWidgetAndRange(t *testing.T) {
 	if len(dash.Widgets) == 0 {
 		t.Fatal("no widgets rendered")
 	}
+
+	widgets, _ = s.ListWidgets(layout.ID)
+	if len(widgets) < 2 {
+		t.Fatal("need widgets to reorder")
+	}
+	rev := make([]int64, len(widgets))
+	for i := range widgets {
+		rev[i] = widgets[len(widgets)-1-i].ID
+	}
+	if err := s.ReorderWidgets(pid, rev); err != nil {
+		t.Fatal(err)
+	}
+	ordered, err := s.ListWidgets(layout.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rev {
+		if ordered[i].ID != rev[i] {
+			t.Fatalf("reorder[%d]=%d want %d", i, ordered[i].ID, rev[i])
+		}
+		if ordered[i].SortOrder != i {
+			t.Fatalf("sort_order[%d]=%d", i, ordered[i].SortOrder)
+		}
+	}
+	if err := s.ReorderWidgets(pid, []int64{rev[0], 99999}); err == nil {
+		t.Fatal("expected unknown widget to be rejected")
+	}
+	if err := s.ReorderWidgets(pid, rev[:1]); err == nil {
+		t.Fatal("expected partial order to be rejected")
+	}
 }
 
 func TestResolveDatesLast12(t *testing.T) {

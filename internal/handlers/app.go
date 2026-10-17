@@ -43,35 +43,35 @@ type pageData struct {
 	People       []models.Person
 	ReviewCount  int
 	// forms / misc
-	Form            any
-	FormBalance     string
-	HouseholdName   string
-	CurrencySel     string
-	Timezone        string
-	PersonAName     string
-	PersonBName     string
-	Name            string
-	Items           []models.Transaction
-	StatementDate   string
-	EndingBalance   string
-	Result          *reconcileResult
-	UndoID          string
-	Message         string
+	Form          any
+	FormBalance   string
+	HouseholdName string
+	CurrencySel   string
+	Timezone      string
+	PersonAName   string
+	PersonBName   string
+	Name          string
+	Items         []models.Transaction
+	StatementDate string
+	EndingBalance string
+	Result        *reconcileResult
+	UndoID        string
+	Message       string
 	// import / rules
-	Batches         []models.ImportBatch
-	Batch           *models.ImportBatch
-	Profiles        []models.MappingProfile
-	Rules           []models.PayeeRule
-	StagingRows     []models.StagingRow
-	DrawerRow       *models.StagingRow
-	Headers         []string
-	Guess           any
-	Page            int
-	PageSize        int
-	Total           int
-	TotalPages      int
-	ExceptionsOnly  bool
-	ImportedCount   int
+	Batches        []models.ImportBatch
+	Batch          *models.ImportBatch
+	Profiles       []models.MappingProfile
+	Rules          []models.PayeeRule
+	StagingRows    []models.StagingRow
+	DrawerRow      *models.StagingRow
+	Headers        []string
+	Guess          any
+	Page           int
+	PageSize       int
+	Total          int
+	TotalPages     int
+	ExceptionsOnly bool
+	ImportedCount  int
 	// filters / reports
 	Filter       filterView
 	GroupBy      string
@@ -179,6 +179,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", a.requireAuth(a.home))
 	mux.HandleFunc("POST /dashboard/range", a.requireAuth(a.csrf(a.dashboardSetRange)))
 	mux.HandleFunc("POST /dashboard/widgets", a.requireAuth(a.csrf(a.dashboardAddWidget)))
+	mux.HandleFunc("POST /dashboard/widgets/reorder", a.requireAuth(a.csrf(a.dashboardReorderWidgets)))
 	mux.HandleFunc("POST /dashboard/widgets/{id}/move", a.requireAuth(a.csrf(a.dashboardMoveWidget)))
 	mux.HandleFunc("POST /dashboard/widgets/{id}/width", a.requireAuth(a.csrf(a.dashboardSetWidth)))
 	mux.HandleFunc("POST /dashboard/widgets/{id}/delete", a.requireAuth(a.csrf(a.dashboardRemoveWidget)))

@@ -220,7 +220,7 @@ func (s *Store) AccountBalanceAsOf(accountID int64, asOfDate string) (int64, err
 		return 0, err
 	}
 	if asOfDate < anchorDate {
-		return anchor, nil
+		return 0, nil
 	}
 	var sum sql.NullInt64
 	err = s.DB.QueryRow(`

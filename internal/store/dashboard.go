@@ -27,10 +27,10 @@ const (
 
 // CatalogEntry describes an addable widget type.
 type CatalogEntry struct {
-	Type        string
-	Label       string
+	Type         string
+	Label        string
 	DefaultWidth string
-	NeedsFilter bool // saved_filter requires picking a saved filter
+	NeedsFilter  bool // saved_filter requires picking a saved filter
 }
 
 // WidgetCatalog is the fixed set of personal dashboard widgets.
@@ -395,6 +395,54 @@ func (s *Store) MoveWidget(personID, widgetID int64, dir string) error {
 	return nil
 }
 
+// ReorderWidgets sets sort_order to the given id sequence.
+// The sequence must be exactly the widgets on the person's layout.
+func (s *Store) ReorderWidgets(personID int64, ids []int64) error {
+	if personID <= 0 {
+		return fmt.Errorf("person required")
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("order required")
+	}
+	layout, err := s.getLayoutByPerson(&personID)
+	if err != nil {
+		return err
+	}
+	widgets, err := s.ListWidgets(layout.ID)
+	if err != nil {
+		return err
+	}
+	if len(ids) != len(widgets) {
+		return fmt.Errorf("order must list every widget")
+	}
+	known := make(map[int64]bool, len(widgets))
+	for _, w := range widgets {
+		known[w.ID] = true
+	}
+	seen := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if id <= 0 || !known[id] || seen[id] {
+			return fmt.Errorf("unknown widget")
+		}
+		seen[id] = true
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for i, id := range ids {
+		if _, err := tx.Exec(`UPDATE dashboard_widgets SET sort_order=? WHERE id=? AND layout_id=?`, i, id, layout.ID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.touchLayout(layout.ID)
+	return nil
+}
+
 // WidgetView is a populated widget for rendering Home.
 type WidgetView struct {
 	models.DashboardWidget
@@ -419,13 +467,13 @@ type WidgetView struct {
 
 // PersonalDashboard is the assembled Home for one person.
 type PersonalDashboard struct {
-	Layout    models.DashboardLayout
-	Widgets   []WidgetView
-	Catalog   []CatalogEntry
-	Saved     []SavedFilter
-	RangeFrom string
-	RangeTo   string
-	YearMonth string
+	Layout      models.DashboardLayout
+	Widgets     []WidgetView
+	Catalog     []CatalogEntry
+	Saved       []SavedFilter
+	RangeFrom   string
+	RangeTo     string
+	YearMonth   string
 	ReviewCount int
 }
 
@@ -453,19 +501,19 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 
 	// Shared fetches (lazy-filled once)
 	var (
-		dash        *HomeDashboard
-		accts       []models.Account
-		txs         []models.Transaction
-		goals       []models.GoalProgress
-		cashFlow    []CashFlowPoint
-		segments    []SegmentTotal
-		segTotal    int64
-		haveDash    bool
-		haveAccts   bool
-		haveTxs     bool
-		haveGoals   bool
-		haveCF      bool
-		haveSeg     bool
+		dash      *HomeDashboard
+		accts     []models.Account
+		txs       []models.Transaction
+		goals     []models.GoalProgress
+		cashFlow  []CashFlowPoint
+		segments  []SegmentTotal
+		segTotal  int64
+		haveDash  bool
+		haveAccts bool
+		haveTxs   bool
+		haveGoals bool
+		haveCF    bool
+		haveSeg   bool
 	)
 
 	loadDash := func() error {
@@ -605,7 +653,7 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 				v.Error = err.Error()
 			} else {
 				v.CashFlow = cashFlow
-				v.ChartJSON = dashboardCashFlowChart(cashFlow)
+				v.ChartJSON = CashFlowChart(cashFlow, false)
 				v.ShowChart = len(cashFlow) > 0
 			}
 		case WidgetCategorySpend:
@@ -614,7 +662,7 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 			} else {
 				v.Segments = segments
 				v.SegmentTotal = segTotal
-				v.ChartJSON = dashboardCategoryChart(segments)
+				v.ChartJSON = CategoryChart(segments, false)
 				v.ShowChart = len(segments) > 0
 			}
 		case WidgetSavedFilter:
@@ -654,67 +702,4 @@ func savedFilterIDFromConfig(cfg string) int64 {
 		return 0
 	}
 	return int64Val(m["saved_filter_id"])
-}
-
-func dashboardCashFlowChart(points []CashFlowPoint) string {
-	labels := make([]string, len(points))
-	income := make([]float64, len(points))
-	expense := make([]float64, len(points))
-	for i, p := range points {
-		labels[i] = p.Label
-		if p.InProgress {
-			labels[i] += " *"
-		}
-		income[i] = float64(p.Income) / 100
-		expense[i] = float64(p.Expense) / 100
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels": labels,
-			"datasets": []map[string]any{
-				{"label": "Income", "data": income, "backgroundColor": "rgba(47, 93, 80, 0.8)"},
-				{"label": "Expense", "data": expense, "backgroundColor": "rgba(139, 58, 58, 0.75)"},
-			},
-		},
-		"options": map[string]any{
-			"responsive":          true,
-			"maintainAspectRatio": false,
-			"scales": map[string]any{
-				"y": map[string]any{"beginAtZero": true},
-			},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
-}
-
-func dashboardCategoryChart(segs []SegmentTotal) string {
-	labels := make([]string, len(segs))
-	data := make([]float64, len(segs))
-	for i, s := range segs {
-		labels[i] = s.Label
-		data[i] = float64(s.Amount) / 100
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels": labels,
-			"datasets": []map[string]any{{
-				"label":           "Spend",
-				"data":            data,
-				"backgroundColor": "rgba(47, 93, 80, 0.75)",
-				"borderRadius":    6,
-			}},
-		},
-		"options": map[string]any{
-			"indexAxis":           "y",
-			"responsive":          true,
-			"maintainAspectRatio": false,
-			"plugins":             map[string]any{"legend": map[string]any{"display": false}},
-			"scales":              map[string]any{"x": map[string]any{"beginAtZero": true}},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
 }

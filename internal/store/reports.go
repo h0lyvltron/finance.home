@@ -192,7 +192,10 @@ func (s *Store) CashFlow(f QueryFilter, grain string, h *models.Household, now t
 		p.InProgress = p.Period == currentKey
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return FillCashFlowGaps(out, grain, f.DateFrom, f.DateTo, now, h), nil
 }
 
 func currentPeriodKey(grain string, now time.Time, h *models.Household) string {
@@ -498,10 +501,7 @@ func (s *Store) SegmentPivot(f QueryFilter, groupBy, grain string, h *models.Hou
 	for _, rk := range pt.RowKeys {
 		pt.RowLabels = append(pt.RowLabels, rowLabel[rk])
 	}
-	for _, ck := range pt.ColKeys {
-		pt.ColLabels = append(pt.ColLabels, formatPeriodLabel(grain, ck))
-	}
-	pt.InProgCol = currentPeriodKey(grain, now, h)
+	fillPivotColumns(pt, grain, f.DateFrom, f.DateTo, now, h)
 	return pt, nil
 }
 
@@ -532,4 +532,159 @@ func (pt *PivotTable) ColTotal(col string) int64 {
 		return 0
 	}
 	return pt.ColTotals[col]
+}
+
+// FillCashFlowGaps inserts a zero point for every bucket from the start of the
+// range through min(range end, today). Buckets after today are not invented.
+// Real points after today are kept, without filling the gaps between them.
+func FillCashFlowGaps(points []CashFlowPoint, grain, from, to string, now time.Time, h *models.Household) []CashFlowPoint {
+	keys := boundedPeriodKeys(grain, from, to, now, h)
+	if len(keys) == 0 {
+		return points
+	}
+	by := make(map[string]CashFlowPoint, len(points))
+	for _, p := range points {
+		by[p.Period] = p
+	}
+	current := currentPeriodKey(grain, now, h)
+	out := make([]CashFlowPoint, 0, len(keys))
+	used := map[string]bool{}
+	for _, k := range keys {
+		if p, ok := by[k]; ok {
+			out = append(out, p)
+			used[k] = true
+			continue
+		}
+		out = append(out, CashFlowPoint{
+			Period:     k,
+			Label:      formatPeriodLabel(grain, k),
+			InProgress: k == current,
+		})
+	}
+	last := keys[len(keys)-1]
+	var extra []CashFlowPoint
+	for _, p := range points {
+		if used[p.Period] || p.Period <= last {
+			continue
+		}
+		extra = append(extra, p)
+	}
+	sort.Slice(extra, func(i, j int) bool { return extra[i].Period < extra[j].Period })
+	return append(out, extra...)
+}
+
+func fillPivotColumns(pt *PivotTable, grain, from, to string, now time.Time, h *models.Household) {
+	if pt == nil {
+		return
+	}
+	keys := boundedPeriodKeys(grain, from, to, now, h)
+	if len(keys) > 0 {
+		inRange := make(map[string]bool, len(keys))
+		for _, k := range keys {
+			inRange[k] = true
+		}
+		var before, after []string
+		for _, k := range pt.ColKeys {
+			if inRange[k] {
+				continue
+			}
+			if k < keys[0] {
+				before = append(before, k)
+			} else {
+				after = append(after, k)
+			}
+		}
+		sort.Strings(before)
+		sort.Strings(after)
+		cols := make([]string, 0, len(before)+len(keys)+len(after))
+		cols = append(cols, before...)
+		cols = append(cols, keys...)
+		cols = append(cols, after...)
+		pt.ColKeys = cols
+	}
+	pt.ColLabels = make([]string, len(pt.ColKeys))
+	for i, ck := range pt.ColKeys {
+		pt.ColLabels[i] = formatPeriodLabel(grain, ck)
+	}
+	pt.InProgCol = currentPeriodKey(grain, now, h)
+}
+
+func boundedPeriodKeys(grain, from, to string, now time.Time, h *models.Household) []string {
+	if from == "" || to == "" {
+		return nil
+	}
+	end := to
+	today := todayISO(now, h)
+	if today < end {
+		end = today
+	}
+	if end < from {
+		return nil
+	}
+	return enumeratePeriodKeys(grain, from, end)
+}
+
+func todayISO(now time.Time, h *models.Household) string {
+	if h != nil && h.Timezone != "" {
+		if loc, err := time.LoadLocation(h.Timezone); err == nil {
+			now = now.In(loc)
+		}
+	}
+	return now.Format("2006-01-02")
+}
+
+func enumeratePeriodKeys(grain, from, to string) []string {
+	start, err1 := time.Parse("2006-01-02", from)
+	end, err2 := time.Parse("2006-01-02", to)
+	if err1 != nil || err2 != nil || end.Before(start) {
+		return nil
+	}
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	var keys []string
+	switch defaultGrain(grain) {
+	case "day":
+		for !start.After(end) {
+			keys = append(keys, start.Format("2006-01-02"))
+			start = start.AddDate(0, 0, 1)
+		}
+	case "week":
+		start = mondayUTC(start)
+		for !start.After(end) {
+			keys = append(keys, start.Format("2006-01-02"))
+			start = start.AddDate(0, 0, 7)
+		}
+	case "quarter":
+		cur := quarterStartUTC(start)
+		for !cur.After(end) {
+			q := (int(cur.Month()) + 2) / 3
+			keys = append(keys, fmt.Sprintf("%04d-Q%d", cur.Year(), q))
+			cur = cur.AddDate(0, 3, 0)
+		}
+	case "year":
+		for y := start.Year(); y <= end.Year(); y++ {
+			keys = append(keys, fmt.Sprintf("%04d", y))
+		}
+	default:
+		cur := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC)
+		for !cur.After(end) {
+			keys = append(keys, cur.Format("2006-01"))
+			cur = cur.AddDate(0, 1, 0)
+		}
+	}
+	return keys
+}
+
+func mondayUTC(t time.Time) time.Time {
+	t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	wd := int(t.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	return t.AddDate(0, 0, -(wd - 1))
+}
+
+func quarterStartUTC(t time.Time) time.Time {
+	q := (int(t.Month()) - 1) / 3
+	return time.Date(t.Year(), time.Month(q*3+1), 1, 0, 0, 0, 0, time.UTC)
 }

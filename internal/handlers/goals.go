@@ -50,7 +50,7 @@ func (a *App) goalsPage(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 		if err == nil && len(pts) > 0 {
 			d.DebtSeries = pts
 			d.DebtGoalName = p.Goal.Name
-			d.ChartJSON = template.JS(chartJSONLinePoints(pts, "Balance owed", "rgba(139, 58, 58, 0.85)"))
+			d.ChartJSON = template.JS(chartJSONLinePoints(pts, "Balance owed", "var:expense"))
 			d.ShowChart = true
 		}
 		break
@@ -156,10 +156,11 @@ func chartJSONLinePoints(pts []models.BalancePoint, label, color string) string 
 				"label":           label,
 				"data":            data,
 				"borderColor":     color,
-				"backgroundColor": "rgba(47, 93, 80, 0.12)",
+				"backgroundColor": "var:net-fill",
 				"fill":            true,
 				"tension":         0.25,
 				"pointRadius":     0,
+				"borderWidth":     2,
 			}},
 		},
 		"options": map[string]any{
@@ -172,6 +173,7 @@ func chartJSONLinePoints(pts []models.BalancePoint, label, color string) string 
 				"y": map[string]any{"beginAtZero": false},
 			},
 		},
+		"finance": map[string]any{"format": "currency"},
 	}
 	b, _ := json.Marshal(cfg)
 	return string(b)

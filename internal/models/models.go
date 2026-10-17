@@ -65,11 +65,11 @@ type Payee struct {
 }
 
 type SplitLine struct {
-	ID         int64
-	CategoryID int64
-	Person     string
-	Amount     int64
-	Notes      string
+	ID           int64
+	CategoryID   int64
+	Person       string
+	Amount       int64
+	Notes        string
 	CategoryName string
 }
 
@@ -119,35 +119,35 @@ type MappingProfile struct {
 }
 
 type PayeeRule struct {
-	ID             int64
-	SortOrder      int
-	Name           string
-	Enabled        bool
-	PayeeMatch     string // contains|equals|starts_with
-	PayeeValue     string
-	AmountMin      *int64
-	AmountMax      *int64
-	AccountID      *int64
-	NotesContains  string
-	SetCategoryID  *int64
+	ID              int64
+	SortOrder       int
+	Name            string
+	Enabled         bool
+	PayeeMatch      string // contains|equals|starts_with
+	PayeeValue      string
+	AmountMin       *int64
+	AmountMax       *int64
+	AccountID       *int64
+	NotesContains   string
+	SetCategoryID   *int64
 	SetCategoryName string
-	SetPerson      string
-	RenamePayee    string
-	SetTags        string
+	SetPerson       string
+	RenamePayee     string
+	SetTags         string
 }
 
 type ImportBatch struct {
-	ID             int64
-	AccountID      *int64
-	AccountName    string
-	ProfileID      *int64
-	Filename       string
-	Status         string
-	Headers        []string
-	RowCount       int
-	ImportedCount  int
-	CreatedAt      string
-	CommittedAt    string
+	ID            int64
+	AccountID     *int64
+	AccountName   string
+	ProfileID     *int64
+	Filename      string
+	Status        string
+	Headers       []string
+	RowCount      int
+	ImportedCount int
+	CreatedAt     string
+	CommittedAt   string
 }
 
 type StagingRow struct {
@@ -184,22 +184,22 @@ type ReviewItem struct {
 
 // BudgetLine is a resolved monthly budget row (defaults + override + rollover).
 type BudgetLine struct {
-	CategoryID   int64
-	CategoryName string
-	ParentID     *int64
-	ParentName   string
+	CategoryID    int64
+	CategoryName  string
+	ParentID      *int64
+	ParentName    string
 	FixedFlexible string
-	BudgetMode   string // rollup | independent
-	IsParent     bool
-	HasChildren  bool
-	AmountCents  int64 // effective target after rollover
-	BaseCents    int64 // target before rollover carry
-	Rollover     bool
+	BudgetMode    string // rollup | independent
+	IsParent      bool
+	HasChildren   bool
+	AmountCents   int64 // effective target after rollover
+	BaseCents     int64 // target before rollover carry
+	Rollover      bool
 	RolloverCarry int64
-	SpentCents   int64 // positive magnitude of expense
-	Remaining    int64 // Amount - Spent
+	SpentCents    int64 // positive magnitude of expense
+	Remaining     int64 // Amount - Spent
 	ExcludeBudget bool
-	Color        string
+	Color         string
 }
 
 type ScheduleTemplate struct {
@@ -222,28 +222,28 @@ type ScheduleTemplate struct {
 }
 
 type ScheduleInstance struct {
-	ID              int64
-	TemplateID      int64
-	TemplateName    string
-	PayeeName       string
-	DueDate         string
-	ExpectedAmount  int64
-	Status          string // upcoming|matched|skipped|overdue
-	MatchedTxID     *int64
-	Kind            string
-	CategoryName    string
-	AccountName     string
-	DaysUntil       int
+	ID             int64
+	TemplateID     int64
+	TemplateName   string
+	PayeeName      string
+	DueDate        string
+	ExpectedAmount int64
+	Status         string // upcoming|matched|skipped|overdue
+	MatchedTxID    *int64
+	Kind           string
+	CategoryName   string
+	AccountName    string
+	DaysUntil      int
 }
 
 type CoachingInsight struct {
-	Kind     string // pace|review|bills|positive|goal|spike|card
-	Tone     string // warn|ok|info
-	Title    string
-	Detail   string
-	Href     string
-	Amount   int64 // optional cents for display
-	ShowAmt  bool
+	Kind    string // pace|review|bills|positive|goal|spike|card
+	Tone    string // warn|ok|info
+	Title   string
+	Detail  string
+	Href    string
+	Amount  int64 // optional cents for display
+	ShowAmt bool
 }
 
 // DraftTransaction is a durable quick-add draft (offline queue / Save draft).
@@ -345,16 +345,27 @@ type NetWorthSeries struct {
 	Change   int64
 }
 
+type SavingsRatePoint struct {
+	Period    string
+	Label     string
+	Income    int64
+	Expense   int64
+	Saved     int64
+	RatePct   float64
+	HasIncome bool
+}
+
 type SavingsRateReport struct {
-	Income         int64
-	Expense        int64
-	Saved          int64 // income - expense
-	RatePct        float64
-	TargetCents    int64 // household monthly savings target (scaled to range when possible)
-	TargetRatePct  float64
-	HasTarget      bool
-	VsTargetCents  int64 // Saved - TargetCents
-	YearMonth      string
+	Income        int64
+	Expense       int64
+	Saved         int64 // income - expense
+	RatePct       float64
+	TargetCents   int64 // household monthly savings target (scaled to range when possible)
+	TargetRatePct float64
+	HasTarget     bool
+	VsTargetCents int64 // Saved - TargetCents
+	YearMonth     string
+	Points        []SavingsRatePoint
 }
 
 type MonthlyRecap struct {

@@ -54,14 +54,24 @@ func (s *Store) NetWorthSeries(from, to string, includeAccounts bool) (models.Ne
 	} else if days > 90 {
 		step = 3
 	}
+	var dates []time.Time
+	for d := start; !d.After(end); d = d.AddDate(0, 0, step) {
+		dates = append(dates, d)
+	}
+	if len(dates) == 0 {
+		dates = []time.Time{end}
+	} else if !dates[len(dates)-1].Equal(end) {
+		// Move the last sample onto the range end so the closing segment is not a 1-day kink.
+		dates[len(dates)-1] = end
+	}
 
 	type snap struct {
 		date string
 		bals map[int64]int64
 		nw   int64
 	}
-	var snaps []snap
-	for d := start; !d.After(end); d = d.AddDate(0, 0, step) {
+	snaps := make([]snap, 0, len(dates))
+	for _, d := range dates {
 		ds := d.Format("2006-01-02")
 		bals := map[int64]int64{}
 		var nw int64
@@ -74,19 +84,6 @@ func (s *Store) NetWorthSeries(from, to string, includeAccounts bool) (models.Ne
 			nw += b
 		}
 		snaps = append(snaps, snap{date: ds, bals: bals, nw: nw})
-	}
-	if len(snaps) == 0 || snaps[len(snaps)-1].date != to {
-		bals := map[int64]int64{}
-		var nw int64
-		for _, a := range accts {
-			b, err := s.AccountBalanceAsOf(a.ID, to)
-			if err != nil {
-				return out, err
-			}
-			bals[a.ID] = b
-			nw += b
-		}
-		snaps = append(snaps, snap{date: to, bals: bals, nw: nw})
 	}
 
 	for _, sn := range snaps {
@@ -130,6 +127,19 @@ func (s *Store) SavingsRate(f QueryFilter, h *models.Household, now time.Time) (
 		return out, err
 	}
 	for _, p := range points {
+		saved := p.Income - p.Expense
+		sp := models.SavingsRatePoint{
+			Period:  p.Period,
+			Label:   p.Label,
+			Income:  p.Income,
+			Expense: p.Expense,
+			Saved:   saved,
+		}
+		if p.Income > 0 {
+			sp.HasIncome = true
+			sp.RatePct = float64(saved) / float64(p.Income) * 100
+		}
+		out.Points = append(out.Points, sp)
 		out.Income += p.Income
 		out.Expense += p.Expense
 	}

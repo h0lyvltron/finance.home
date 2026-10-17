@@ -51,6 +51,7 @@
 }
 
 * { box-sizing: border-box; }
+html { scrollbar-gutter: stable; }
 html, body { margin: 0; padding: 0; }
 body {
   font-family: var(--font);
@@ -73,7 +74,9 @@ a:hover { text-decoration: underline; }
   padding: 0 1rem calc(var(--nav-h) + 1.5rem + var(--safe-bottom));
 }
 
-.app-shell.wide { max-width: 960px; }
+/* Same column on every page that shows the main nav, so the bar and page don't jump. */
+.app-shell:has(.bottom-nav),
+.app-shell.wide { max-width: 1100px; }
 
 .topbar {
   display: flex;
@@ -393,7 +396,6 @@ h3 { font-size: 1.05rem; }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 /* Filters + Explore */
-.app-shell.wide { max-width: 1100px; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .65rem 0; }
 .chip-active { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .check-grid { display: flex; flex-direction: column; gap: .35rem; }
@@ -432,14 +434,31 @@ h3 { font-size: 1.05rem; }
     position: sticky;
     top: 0;
     bottom: auto;
+    z-index: 40;
     grid-template-columns: repeat(5, auto);
     justify-content: start;
     border-top: 0;
     border-bottom: 1px solid var(--line);
-    background: transparent;
+    background: var(--bg);
     backdrop-filter: none;
     padding: .5rem 0;
     margin-bottom: 1rem;
+  }
+  /* Cover the bar and everything that scrolls above it, including the side gutters. */
+  .bottom-nav::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    top: -100vh;
+    bottom: 0;
+    left: 50%;
+    width: 100dvw;
+    transform: translateX(-50%);
+    background: var(--bg);
+  }
+  .bottom-nav a {
+    position: relative;
+    z-index: 1;
   }
   .fab { bottom: 1.5rem; }
   .toast-region { bottom: 1.5rem; }
@@ -598,6 +617,37 @@ h3 { font-size: 1.05rem; }
   margin-bottom: .35rem;
   padding: .25rem 0;
 }
+.dash-drag-grip {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-faint);
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: -0.14em;
+  line-height: 1;
+  padding: .35rem .45rem;
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  touch-action: none;
+}
+.dash-drag-grip:hover { background: var(--bg-muted); color: var(--ink); }
+.dash-drag-grip:active,
+.dash-widget.is-dragging .dash-drag-grip { cursor: grabbing; }
+.dash-widget.is-dragging {
+  z-index: 80;
+  margin: 0;
+  pointer-events: none;
+  opacity: .96;
+  box-shadow: var(--shadow);
+}
+.dash-drop-placeholder {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-muted));
+  min-height: 3.5rem;
+  pointer-events: none;
+}
 .dash-widget-hero .home-hero { padding-top: 0; }
 .chart-wrap-sm { height: 200px; margin-top: .65rem; }
 @media (min-width: 720px) {
@@ -607,9 +657,13 @@ h3 { font-size: 1.05rem; }
     gap: .85rem;
     align-items: start;
   }
-  .dash-widget.width-s { grid-column: span 2; }
-  .dash-widget.width-m { grid-column: span 3; }
-  .dash-widget.width-l { grid-column: span 6; }
-  .dash-widget-hero { grid-column: span 6; }
+  .dash-widget.width-s,
+  .dash-drop-placeholder.width-s { grid-column: span 2; }
+  .dash-widget.width-m,
+  .dash-drop-placeholder.width-m { grid-column: span 3; }
+  .dash-widget.width-l,
+  .dash-drop-placeholder.width-l { grid-column: span 6; }
+  .dash-widget-hero,
+  .dash-drop-placeholder.dash-widget-hero { grid-column: span 6; }
   .chart-wrap-sm { height: 220px; }
 }

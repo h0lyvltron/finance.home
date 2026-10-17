@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"finance.home/internal/auth"
-	"finance.home/internal/models"
 	"finance.home/internal/store"
 )
 
@@ -75,7 +73,7 @@ func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 	d.GroupBy = groupBy
 	d.Segments = segs
 	d.ReportTotal = grand
-	d.ChartJSON = template.JS(chartJSONHorizontalBarCompare(segs, d.CompareMode == "ly"))
+	d.ChartJSON = template.JS(store.CategoryChart(segs, d.CompareMode == "ly"))
 	d.DrillBase = "/transactions"
 
 	a.Render.RenderHTTP(w, "explore", d)
@@ -132,7 +130,7 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 	d.IncomeTotal = income
 	d.ExpenseTotal = expense
 	d.ReportTotal = net
-	d.ChartJSON = template.JS(chartJSONCashFlowCompare(points, d.CompareMode == "ly"))
+	d.ChartJSON = template.JS(store.CashFlowChart(points, d.CompareMode == "ly"))
 	d.DrillBase = "/transactions"
 
 	a.Render.RenderHTTP(w, "cashflow", d)
@@ -168,175 +166,11 @@ func (a *App) pivotPage(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 	d.Grain = grain
 	d.Pivot = pt
 	d.ReportTotal = pt.Grand
-	d.ChartJSON = template.JS(chartJSONPivotStacked(pt))
+	d.ChartJSON = template.JS(store.PivotChart(pt))
 	d.ShowChart = len(pt.ColKeys) > 0 && len(pt.ColKeys) <= 18 && len(pt.RowKeys) > 0 && len(pt.RowKeys) <= 12
 	d.DrillBase = "/transactions"
 
 	a.Render.RenderHTTP(w, "pivot", d)
-}
-
-func chartJSONHorizontalBar(segs []store.SegmentTotal) string {
-	return chartJSONHorizontalBarCompare(segs, false)
-}
-
-func chartJSONHorizontalBarCompare(segs []store.SegmentTotal, withCompare bool) string {
-	labels := make([]string, len(segs))
-	data := make([]float64, len(segs))
-	compare := make([]float64, len(segs))
-	for i, s := range segs {
-		labels[i] = s.Label
-		data[i] = float64(s.Amount) / 100
-		if s.HasCompare {
-			compare[i] = float64(s.CompareAmount) / 100
-		}
-	}
-	datasets := []map[string]any{{
-		"label":           "Spend",
-		"data":            data,
-		"backgroundColor": "rgba(47, 93, 80, 0.75)",
-		"borderRadius":    6,
-	}}
-	if withCompare {
-		datasets = append(datasets, map[string]any{
-			"label":           "Last year",
-			"data":            compare,
-			"backgroundColor": "rgba(120, 120, 110, 0.45)",
-			"borderRadius":    6,
-		})
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels":   labels,
-			"datasets": datasets,
-		},
-		"options": map[string]any{
-			"indexAxis":          "y",
-			"responsive":         true,
-			"maintainAspectRatio": false,
-			"plugins": map[string]any{
-				"legend": map[string]any{"display": withCompare},
-			},
-			"scales": map[string]any{
-				"x": map[string]any{"beginAtZero": true},
-			},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
-}
-
-func chartJSONCashFlow(points []store.CashFlowPoint) string {
-	return chartJSONCashFlowCompare(points, false)
-}
-
-func chartJSONCashFlowCompare(points []store.CashFlowPoint, withCompare bool) string {
-	labels := make([]string, len(points))
-	income := make([]float64, len(points))
-	expense := make([]float64, len(points))
-	lyIncome := make([]float64, len(points))
-	lyExpense := make([]float64, len(points))
-	for i, p := range points {
-		labels[i] = p.Label
-		if p.InProgress {
-			labels[i] += " *"
-		}
-		income[i] = float64(p.Income) / 100
-		expense[i] = float64(p.Expense) / 100
-		if p.HasCompare {
-			lyIncome[i] = float64(p.CompareIncome) / 100
-			lyExpense[i] = float64(p.CompareExpense) / 100
-		}
-	}
-	datasets := []map[string]any{
-		{"label": "Income", "data": income, "backgroundColor": "rgba(47, 93, 80, 0.8)"},
-		{"label": "Expense", "data": expense, "backgroundColor": "rgba(139, 58, 58, 0.75)"},
-	}
-	if withCompare {
-		datasets = append(datasets,
-			map[string]any{"label": "Income LY", "data": lyIncome, "backgroundColor": "rgba(47, 93, 80, 0.35)"},
-			map[string]any{"label": "Expense LY", "data": lyExpense, "backgroundColor": "rgba(139, 58, 58, 0.35)"},
-		)
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels":   labels,
-			"datasets": datasets,
-		},
-		"options": map[string]any{
-			"responsive":          true,
-			"maintainAspectRatio": false,
-			"scales": map[string]any{
-				"x": map[string]any{"stacked": false},
-				"y": map[string]any{"beginAtZero": true},
-			},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
-}
-
-func chartJSONPivotStacked(pt *store.PivotTable) string {
-	if pt == nil {
-		return "null"
-	}
-	// Limit series for readability
-	rows := pt.RowKeys
-	labels := pt.RowLabels
-	if len(rows) > 8 {
-		rows = rows[:8]
-		labels = labels[:8]
-	}
-	palette := []string{
-		"rgba(47, 93, 80, 0.85)",
-		"rgba(139, 58, 58, 0.75)",
-		"rgba(138, 106, 47, 0.8)",
-		"rgba(60, 90, 140, 0.8)",
-		"rgba(110, 70, 120, 0.8)",
-		"rgba(70, 120, 100, 0.8)",
-		"rgba(160, 90, 60, 0.8)",
-		"rgba(90, 90, 90, 0.7)",
-	}
-	datasets := make([]map[string]any, 0, len(rows))
-	for i, rk := range rows {
-		data := make([]float64, len(pt.ColKeys))
-		for j, ck := range pt.ColKeys {
-			if cell, ok := pt.Cells[rk][ck]; ok {
-				data[j] = float64(cell.Amount) / 100
-			}
-		}
-		datasets = append(datasets, map[string]any{
-			"label":           labels[i],
-			"data":            data,
-			"backgroundColor": palette[i%len(palette)],
-			"stack":           "spend",
-		})
-	}
-	colLabels := make([]string, len(pt.ColKeys))
-	for i, ck := range pt.ColKeys {
-		colLabels[i] = pt.ColLabels[i]
-		if ck == pt.InProgCol {
-			colLabels[i] += " *"
-		}
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels":   colLabels,
-			"datasets": datasets,
-		},
-		"options": map[string]any{
-			"responsive": true,
-			"maintainAspectRatio": false,
-			"scales": map[string]any{
-				"x": map[string]any{"stacked": true},
-				"y": map[string]any{"stacked": true, "beginAtZero": true},
-			},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
 }
 
 func (a *App) networthPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
@@ -364,7 +198,7 @@ func (a *App) networthPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 	d.NetWorthSeries = series
 	d.NetWorth = series.End
 	d.ReportTotal = series.Change
-	d.ChartJSON = template.JS(chartJSONNetWorth(series))
+	d.ChartJSON = template.JS(store.NetWorthChart(series))
 	d.ShowChart = len(series.Points) > 0
 	a.Render.RenderHTTP(w, "networth", d)
 }
@@ -387,7 +221,7 @@ func (a *App) budgetReportPage(w http.ResponseWriter, r *http.Request, sess *aut
 	d.BudgetLines = lines
 	bh, _ := a.Store.BudgetHealthSummary(ym)
 	d.BudgetHealth = bh
-	d.ChartJSON = template.JS(chartJSONBudgetVsActual(lines))
+	d.ChartJSON = template.JS(store.BudgetChart(lines))
 	d.ShowChart = true
 
 	f := store.QueryFilter{DatePreset: "custom"}
@@ -431,121 +265,7 @@ func (a *App) savingsRatePage(w http.ResponseWriter, r *http.Request, sess *auth
 	d.IncomeTotal = sr.Income
 	d.ExpenseTotal = sr.Expense
 	d.ReportTotal = sr.Saved
-	d.ChartJSON = template.JS(chartJSONSavingsRate(sr))
+	d.ChartJSON = template.JS(store.SavingsRateChart(sr))
 	d.ShowChart = true
 	a.Render.RenderHTTP(w, "savings-rate", d)
-}
-
-func chartJSONNetWorth(series models.NetWorthSeries) string {
-	labels := make([]string, len(series.Points))
-	data := make([]float64, len(series.Points))
-	for i, p := range series.Points {
-		labels[i] = p.Label
-		data[i] = float64(p.Amount) / 100
-	}
-	datasets := []map[string]any{{
-		"label":           "Net worth",
-		"data":            data,
-		"borderColor":     "rgba(47, 93, 80, 0.9)",
-		"backgroundColor": "rgba(47, 93, 80, 0.12)",
-		"fill":            true,
-		"tension":         0.25,
-		"pointRadius":     0,
-	}}
-	palette := []string{
-		"rgba(60, 90, 140, 0.75)",
-		"rgba(138, 106, 47, 0.75)",
-		"rgba(139, 58, 58, 0.7)",
-		"rgba(110, 70, 120, 0.7)",
-		"rgba(70, 120, 100, 0.7)",
-	}
-	for i, acct := range series.Accounts {
-		if i >= 5 {
-			break
-		}
-		ad := make([]float64, len(acct.Points))
-		for j, p := range acct.Points {
-			ad[j] = float64(p.Amount) / 100
-		}
-		datasets = append(datasets, map[string]any{
-			"label":           acct.AccountName,
-			"data":            ad,
-			"borderColor":     palette[i%len(palette)],
-			"backgroundColor": "transparent",
-			"fill":            false,
-			"tension":         0.2,
-			"pointRadius":     0,
-			"borderWidth":     1.5,
-		})
-	}
-	cfg := map[string]any{
-		"type": "line",
-		"data": map[string]any{"labels": labels, "datasets": datasets},
-		"options": map[string]any{
-			"responsive": true, "maintainAspectRatio": false,
-			"scales": map[string]any{"y": map[string]any{"beginAtZero": false}},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
-}
-
-func chartJSONBudgetVsActual(lines []models.BudgetLine) string {
-	var labels []string
-	var budgeted, spent []float64
-	for _, ln := range lines {
-		if ln.HasChildren || (ln.AmountCents <= 0 && ln.SpentCents <= 0) {
-			continue
-		}
-		if len(labels) >= 12 {
-			break
-		}
-		labels = append(labels, ln.CategoryName)
-		budgeted = append(budgeted, float64(ln.AmountCents)/100)
-		spent = append(spent, float64(ln.SpentCents)/100)
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels": labels,
-			"datasets": []map[string]any{
-				{"label": "Budget", "data": budgeted, "backgroundColor": "rgba(47, 93, 80, 0.55)"},
-				{"label": "Actual", "data": spent, "backgroundColor": "rgba(139, 58, 58, 0.7)"},
-			},
-		},
-		"options": map[string]any{
-			"indexAxis": "y",
-			"responsive": true, "maintainAspectRatio": false,
-			"scales": map[string]any{"x": map[string]any{"beginAtZero": true}},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
-}
-
-func chartJSONSavingsRate(sr models.SavingsRateReport) string {
-	labels := []string{"Income", "Expense", "Saved"}
-	data := []float64{float64(sr.Income) / 100, float64(sr.Expense) / 100, float64(sr.Saved) / 100}
-	colors := []string{"rgba(47, 93, 80, 0.8)", "rgba(139, 58, 58, 0.75)", "rgba(60, 90, 140, 0.8)"}
-	if sr.HasTarget {
-		labels = append(labels, "Target")
-		data = append(data, float64(sr.TargetCents)/100)
-		colors = append(colors, "rgba(138, 106, 47, 0.75)")
-	}
-	cfg := map[string]any{
-		"type": "bar",
-		"data": map[string]any{
-			"labels": labels,
-			"datasets": []map[string]any{{
-				"label": "Amount", "data": data, "backgroundColor": colors, "borderRadius": 6,
-			}},
-		},
-		"options": map[string]any{
-			"responsive": true, "maintainAspectRatio": false,
-			"plugins": map[string]any{"legend": map[string]any{"display": false}},
-			"scales":  map[string]any{"y": map[string]any{"beginAtZero": true}},
-		},
-	}
-	b, _ := json.Marshal(cfg)
-	return string(b)
 }
