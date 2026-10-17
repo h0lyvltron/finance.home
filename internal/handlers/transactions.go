@@ -160,7 +160,7 @@ func (a *App) transactionDelete(w http.ResponseWriter, r *http.Request, sess *au
 		html, _ := a.Render.RenderString("toast", pageData{
 			CSRF:    sess.CSRFToken,
 			UndoID:  undoID,
-			Message: "Transaction deleted",
+			Message: "Deleted · undo 30m · recycle bin 30d",
 		})
 		_ = sse.PatchElements(`<div id="toast-region" class="toast-region">`+html+`</div>`)
 		// refresh list simply by redirect script

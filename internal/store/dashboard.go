@@ -472,7 +472,7 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 		if haveDash {
 			return nil
 		}
-		d, err := s.BuildHomeDashboard(h, now)
+		d, err := s.BuildHomeDashboardFor(h, now, personID)
 		if err != nil {
 			return err
 		}

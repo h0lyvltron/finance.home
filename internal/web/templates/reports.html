@@ -21,6 +21,11 @@
       <h1 style="margin:0">Spending Explore</h1>
       <p class="muted small" style="margin:.25rem 0 0">Group spending, then drill into transactions.</p>
     </div>
+    {{if eq .CompareMode "ly"}}
+    <a class="chip chip-ok" href="/explore?{{.Filter.QueryString}}&group={{.GroupBy}}">Compare off</a>
+    {{else}}
+    <a class="chip" href="/explore?{{.Filter.QueryString}}&group={{.GroupBy}}&compare=ly">vs last year</a>
+    {{end}}
   </div>
 
   {{template "report-nav" dict "NavReport" "explore" "Filter" .Filter}}
@@ -32,6 +37,7 @@
     <div class="stack explore-main">
       <form method="get" action="/explore" class="row panel" style="align-items:flex-end">
         <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
+        {{if eq .CompareMode "ly"}}<input type="hidden" name="compare" value="ly">{{end}}
         {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
         {{range .Filter.Filter.CategoryIDs}}<input type="hidden" name="category" value="{{.}}">{{end}}
         {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
@@ -54,6 +60,9 @@
       <div class="panel report-totals">
         <div class="tiny muted">Total spend</div>
         <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
+        {{if eq .CompareMode "ly"}}
+        <div class="tiny muted" style="margin-top:.5rem">Same period last year · {{moneyAbs .CompareTotal .Currency}}</div>
+        {{end}}
       </div>
 
       <div class="panel chart-panel" data-chart>
@@ -71,7 +80,7 @@
           <a class="list-row" {{txFilterAttr .DrillQuery}} style="color:inherit;text-decoration:none">
             <div>
               <div style="font-weight:600">{{.Label}}</div>
-              <div class="tiny muted">{{.Count}} tx</div>
+              <div class="tiny muted">{{.Count}} tx{{if .HasCompare}} · LY {{moneyAbs .CompareAmount $.Currency}}{{if .Delta}} · Δ {{moneyAbs .Delta $.Currency}}{{end}}{{end}}</div>
             </div>
             <div class="tx-amount neg">{{moneyAbs .Amount $.Currency}}</div>
           </a>
@@ -111,6 +120,11 @@
       <h1 style="margin:0">Cash flow</h1>
       <p class="muted small" style="margin:.25rem 0 0">Income, expense, and net by period. * = in progress.</p>
     </div>
+    {{if eq .CompareMode "ly"}}
+    <a class="chip chip-ok" href="/reports/cashflow?{{.Filter.QueryString}}&grain={{.Grain}}">Compare off</a>
+    {{else}}
+    <a class="chip" href="/reports/cashflow?{{.Filter.QueryString}}&grain={{.Grain}}&compare=ly">vs last year</a>
+    {{end}}
   </div>
 
   {{template "report-nav" dict "NavReport" "cashflow" "Filter" .Filter}}
@@ -122,6 +136,7 @@
     <div class="stack explore-main">
       <form method="get" action="/reports/cashflow" class="row panel" style="align-items:flex-end">
         <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
+        {{if eq .CompareMode "ly"}}<input type="hidden" name="compare" value="ly">{{end}}
         {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
         {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
         <div class="field grow">
@@ -138,9 +153,12 @@
       </form>
 
       <div class="panel report-totals totals-row">
-        <div><div class="tiny muted">Income</div><div class="report-total pos">{{money .IncomeTotal .Currency}}</div></div>
-        <div><div class="tiny muted">Expense</div><div class="report-total neg">{{moneyAbs .ExpenseTotal .Currency}}</div></div>
-        <div><div class="tiny muted">Net</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+        <div><div class="tiny muted">Income</div><div class="report-total pos">{{money .IncomeTotal .Currency}}</div>
+          {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{money .CompareIncome .Currency}}</div>{{end}}</div>
+        <div><div class="tiny muted">Expense</div><div class="report-total neg">{{moneyAbs .ExpenseTotal .Currency}}</div>
+          {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{moneyAbs .CompareExpense .Currency}}</div>{{end}}</div>
+        <div><div class="tiny muted">Net</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div>
+          {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{money .CompareTotal .Currency}}</div>{{end}}</div>
       </div>
 
       <div class="panel chart-panel" data-chart>
@@ -155,7 +173,7 @@
         {{else}}
         <div class="table-scroll">
           <table class="data-table">
-            <thead><tr><th>Period</th><th>Income</th><th>Expense</th><th>Net</th></tr></thead>
+            <thead><tr><th>Period</th><th>Income</th><th>Expense</th><th>Net</th>{{if eq $.CompareMode "ly"}}<th>Net LY</th>{{end}}</tr></thead>
             <tbody>
             {{range .CashFlow}}
             <tr>
@@ -163,6 +181,9 @@
               <td class="num pos">{{money .Income $.Currency}}</td>
               <td class="num neg">{{moneyAbs .Expense $.Currency}}</td>
               <td class="num {{if lt .Net 0}}neg{{else}}pos{{end}}">{{money .Net $.Currency}}</td>
+              {{if eq $.CompareMode "ly"}}
+              <td class="num faint">{{if .HasCompare}}{{money .CompareNet $.Currency}}{{else}}—{{end}}</td>
+              {{end}}
             </tr>
             {{end}}
             </tbody>

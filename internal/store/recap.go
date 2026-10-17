@@ -15,7 +15,7 @@ func (s *Store) BuildMonthlyRecap(h *models.Household, ym string, now time.Time)
 		return out, fmt.Errorf("bad month")
 	}
 	out.Label = t.Format("January 2006")
-	from, to, err := monthBounds(ym)
+	from, to, err := FiscalMonthBounds(h, ym)
 	if err != nil {
 		return out, err
 	}

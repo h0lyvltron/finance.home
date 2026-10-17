@@ -8,94 +8,128 @@ import (
 )
 
 // HomeInsights returns up to max insights: actionable warns + one positive counterpart.
-// Partner-comparison insights are off.
+// Partner-comparison insights are off. personID filters snoozed/dismissed kinds.
 func (s *Store) HomeInsights(h *models.Household, now time.Time, max int) ([]models.CoachingInsight, error) {
-	if max <= 0 {
+	return s.HomeInsightsFor(h, now, max, 0)
+}
+
+// HomeInsightsFor is HomeInsights with per-person coaching prefs + fewer_nudges.
+func (s *Store) HomeInsightsFor(h *models.Household, now time.Time, max int, personID int64) ([]models.CoachingInsight, error) {
+	if h != nil && h.FewerNudges {
+		max = 1 // positives-only density
+	} else if max <= 0 {
 		max = 3
 	}
 	ym := YearMonth(h, now)
 	_ = s.EnsureScheduleInstances(localize(h, now), 45)
 
+	prefs := map[string]CoachingPref{}
+	if personID > 0 {
+		if m, err := s.coachingPrefMap(personID); err == nil {
+			prefs = m
+		}
+	}
+	today := localize(h, now).Format("2006-01-02")
+	suppressed := func(kind string) bool {
+		return IsCoachingSuppressed(prefs, kind, today)
+	}
+
 	var warn []models.CoachingInsight
 	var positive *models.CoachingInsight
 
-	if pace := s.PaceInsight(h, ym, now); pace != nil && pace.Tone == "warn" {
-		warn = append(warn, *pace)
-	}
-
-	if n, err := s.NeedsReviewCount(); err == nil && n > 0 {
-		warn = append(warn, models.CoachingInsight{
-			Kind:   "review",
-			Tone:   "warn",
-			Title:  "Needs review",
-			Detail: fmt.Sprintf("%d transaction%s waiting in the review queue", n, plural(n)),
-			Href:   "/review",
-		})
-	}
-
-	overdue, _ := s.UnmatchedOverdueCount()
-	upcoming, _ := s.UpcomingBills(h, now, 14)
-	unmatchedSoon := 0
-	for _, b := range upcoming {
-		if b.Status == "upcoming" || b.Status == "overdue" {
-			unmatchedSoon++
-		}
-	}
-	if overdue > 0 {
-		warn = append(warn, models.CoachingInsight{
-			Kind:   "bills",
-			Tone:   "warn",
-			Title:  "Overdue bills",
-			Detail: fmt.Sprintf("%d bill%s past due and unmatched", overdue, plural(overdue)),
-			Href:   "/plan?tab=bills",
-		})
-	} else if unmatchedSoon > 0 {
-		warn = append(warn, models.CoachingInsight{
-			Kind:   "bills",
-			Tone:   "info",
-			Title:  "Bills coming up",
-			Detail: fmt.Sprintf("%d bill%s in the next 14 days", unmatchedSoon, plural(unmatchedSoon)),
-			Href:   "/plan?tab=bills",
-		})
-	}
-
-	if g := s.GoalBehindInsight(now); g != nil {
-		warn = append(warn, *g)
-	}
-	if spike := s.SpendSpikeInsight(h, ym, now); spike != nil {
-		warn = append(warn, *spike)
-	}
-	if card := s.CardBalanceRiseInsight(h, ym, now); card != nil && card.Tone == "warn" {
-		warn = append(warn, *card)
-	}
-
-	positive = s.PositiveBudgetInsight(ym)
-	if positive == nil {
-		positive = s.GoalMilestoneInsight(now)
-	}
-	if positive == nil {
-		if card := s.CardBalanceRiseInsight(h, ym, now); card != nil && card.Tone == "ok" {
-			positive = card
-		}
-	}
-	if positive == nil {
-		if pace := s.PaceInsight(h, ym, now); pace != nil && pace.Tone != "warn" {
-			// Don't use info pace as the positive slot unless nothing else
-			positive = s.PositiveBudgetInsight(ym)
-		}
-	}
-	if positive == nil {
-		positive = &models.CoachingInsight{
-			Kind:   "positive",
-			Tone:   "ok",
-			Title:  "Books look calm",
-			Detail: "No pace alerts from flexible categories right now.",
-			Href:   "/plan",
+	if !suppressed("pace") {
+		if pace := s.PaceInsight(h, ym, now); pace != nil && pace.Tone == "warn" {
+			warn = append(warn, *pace)
 		}
 	}
 
-	// Prefer actionable warns, always reserve one slot for a positive counterpart.
-	room := max - 1
+	if !suppressed("review") {
+		if n, err := s.NeedsReviewCount(); err == nil && n > 0 {
+			warn = append(warn, models.CoachingInsight{
+				Kind:   "review",
+				Tone:   "warn",
+				Title:  "Needs review",
+				Detail: fmt.Sprintf("%d transaction%s waiting in the review queue", n, plural(n)),
+				Href:   "/review",
+			})
+		}
+	}
+
+	if !suppressed("bills") {
+		overdue, _ := s.UnmatchedOverdueCount()
+		upcoming, _ := s.UpcomingBills(h, now, 14)
+		unmatchedSoon := 0
+		for _, b := range upcoming {
+			if b.Status == "upcoming" || b.Status == "overdue" {
+				unmatchedSoon++
+			}
+		}
+		if overdue > 0 {
+			warn = append(warn, models.CoachingInsight{
+				Kind:   "bills",
+				Tone:   "warn",
+				Title:  "Overdue bills",
+				Detail: fmt.Sprintf("%d bill%s past due and unmatched", overdue, plural(overdue)),
+				Href:   "/plan?tab=bills",
+			})
+		} else if unmatchedSoon > 0 {
+			warn = append(warn, models.CoachingInsight{
+				Kind:   "bills",
+				Tone:   "info",
+				Title:  "Bills coming up",
+				Detail: fmt.Sprintf("%d bill%s in the next 14 days", unmatchedSoon, plural(unmatchedSoon)),
+				Href:   "/plan?tab=bills",
+			})
+		}
+	}
+
+	if !suppressed("goal") {
+		if g := s.GoalBehindInsight(now); g != nil {
+			warn = append(warn, *g)
+		}
+	}
+	if !suppressed("spike") {
+		if spike := s.SpendSpikeInsight(h, ym, now); spike != nil {
+			warn = append(warn, *spike)
+		}
+	}
+	if !suppressed("card") {
+		if card := s.CardBalanceRiseInsight(h, ym, now); card != nil && card.Tone == "warn" {
+			warn = append(warn, *card)
+		}
+	}
+
+	if !suppressed("positive") {
+		positive = s.PositiveBudgetInsight(ym)
+		if positive == nil {
+			positive = s.GoalMilestoneInsight(now)
+		}
+		if positive == nil {
+			if card := s.CardBalanceRiseInsight(h, ym, now); card != nil && card.Tone == "ok" {
+				positive = card
+			}
+		}
+		if positive == nil {
+			if pace := s.PaceInsight(h, ym, now); pace != nil && pace.Tone != "warn" {
+				positive = s.PositiveBudgetInsight(ym)
+			}
+		}
+		if positive == nil {
+			positive = &models.CoachingInsight{
+				Kind:   "positive",
+				Tone:   "ok",
+				Title:  "Books look calm",
+				Detail: "No pace alerts from flexible categories right now.",
+				Href:   "/plan",
+			}
+		}
+	}
+
+	// Prefer actionable warns, always reserve one slot for a positive counterpart when present.
+	room := max
+	if positive != nil {
+		room = max - 1
+	}
 	if room < 0 {
 		room = 0
 	}
@@ -106,7 +140,9 @@ func (s *Store) HomeInsights(h *models.Household, now time.Time, max int) ([]mod
 		}
 		out = append(out, w)
 	}
-	out = append(out, *positive)
+	if positive != nil {
+		out = append(out, *positive)
+	}
 	if len(out) > max {
 		out = out[:max]
 	}
@@ -235,7 +271,7 @@ func (s *Store) SpendSpikeInsight(h *models.Household, ym string, now time.Time)
 
 // CardBalanceRiseInsight warns when credit card outstanding rose this month; celebrates when it fell.
 func (s *Store) CardBalanceRiseInsight(h *models.Household, ym string, now time.Time) *models.CoachingInsight {
-	from, to, err := monthBounds(ym)
+	from, to, err := FiscalMonthBounds(h, ym)
 	if err != nil {
 		return nil
 	}
@@ -355,5 +391,19 @@ func (s *Store) BuildHomeDashboard(h *models.Household, now time.Time) (HomeDash
 	d.ReviewCount, _ = s.NeedsReviewCount()
 	goals, _ := s.ListGoalProgress(now)
 	d.Goals = goals
+	return d, nil
+}
+
+// BuildHomeDashboardFor is BuildHomeDashboard with per-person coaching prefs.
+func (s *Store) BuildHomeDashboardFor(h *models.Household, now time.Time, personID int64) (HomeDashboard, error) {
+	d, err := s.BuildHomeDashboard(h, now)
+	if err != nil {
+		return d, err
+	}
+	insights, err := s.HomeInsightsFor(h, now, 3, personID)
+	if err != nil {
+		return d, err
+	}
+	d.Insights = insights
 	return d, nil
 }

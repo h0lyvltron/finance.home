@@ -451,7 +451,7 @@ func (s *Store) UpcomingBills(h *models.Household, now time.Time, days int) ([]m
 
 // FixedBillsForMonth sums expected expense schedule amounts due in ym (planned fixed outflows).
 func (s *Store) FixedBillsForMonth(ym string) (int64, error) {
-	from, to, err := monthBounds(ym)
+	from, to, err := s.monthBoundsFor(ym)
 	if err != nil {
 		return 0, err
 	}

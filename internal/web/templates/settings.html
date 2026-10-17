@@ -1,0 +1,95 @@
+{{define "settings"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Settings — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/more">← More</a></header>
+  <h1>Settings</h1>
+  <p class="muted">Household calendar, coaching density, and backups.</p>
+
+  {{if eq .Flash "saved"}}<div class="alert alert-ok">Settings saved.</div>{{end}}
+  {{if eq .Flash "coaching"}}<div class="alert alert-ok">Coaching preference cleared.</div>{{end}}
+
+  <form method="post" action="/settings" class="panel stack" style="margin-top:1rem">
+    {{template "csrf" .}}
+    <h2 style="margin:0">Calendar</h2>
+    <div class="field">
+      <label for="month_start_day">Month starts on day</label>
+      <input id="month_start_day" name="month_start_day" type="number" min="1" max="28"
+             value="{{.MonthStartDay}}" required>
+      <p class="tiny muted" style="margin:.35rem 0 0">Use 15–28 for mid-month pay cycles. Budgets and “this month” follow this day.</p>
+    </div>
+
+    <h2 style="margin:1rem 0 0">Coaching</h2>
+    <label class="check">
+      <input type="checkbox" name="fewer_nudges" value="1" {{if .FewerNudges}}checked{{end}}>
+      Fewer nudges (Home shows one calm insight only)
+    </label>
+    <p class="tiny muted">Snooze and dismiss live on each insight card. Per-rule settings page is deferred.</p>
+
+    <button class="btn btn-primary" type="submit">Save settings</button>
+  </form>
+
+  {{if .CoachingPrefs}}
+  <div class="panel" style="margin-top:1rem">
+    <h2 style="margin-top:0">Your snoozed / dismissed</h2>
+    {{range .CoachingPrefs}}
+    <div class="list-row">
+      <div>
+        <div style="font-weight:600">{{.Kind}}</div>
+        <div class="tiny muted">
+          {{if .Dismissed}}Dismissed{{else if .SnoozedUntil}}Snoozed until {{.SnoozedUntil}}{{else}}—{{end}}
+        </div>
+      </div>
+      <form method="post" action="/coaching/clear">
+        {{template "csrf" $}}
+        <input type="hidden" name="kind" value="{{.Kind}}">
+        <button class="btn btn-sm btn-ghost" type="submit">Clear</button>
+      </form>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="panel stack" style="margin-top:1rem">
+    <h2 style="margin:0">Backup</h2>
+    <p class="muted small">Download a consistent SQLite snapshot (<code>VACUUM INTO</code>). Keep the file off the LAN host if you can.</p>
+    <a class="btn btn-primary" href="/settings/backup">Download backup</a>
+    <div class="tiny muted" style="margin-top:.75rem">
+      <strong>Restore (CLI)</strong> — stop the app, replace the DB file, restart:
+      <pre class="code-block">docker compose down
+# copy finance-backup-….db over the volume’s finance.db
+docker compose up -d</pre>
+      Local: stop the server, replace <code>$DB_PATH</code> with the backup, start again.
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:1rem">
+    <a class="list-row" href="/recycle" style="color:inherit;text-decoration:none">
+      <div>
+        <div style="font-weight:600">Recycle bin</div>
+        <div class="tiny muted">Restore soft-deleted transactions ({{.RetentionDays}} day retention)</div>
+      </div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/drafts" style="color:inherit;text-decoration:none">
+      <div>
+        <div style="font-weight:600">Drafts</div>
+        <div class="tiny muted">Offline / saved quick-add drafts</div>
+      </div>
+      <span class="faint">›</span>
+    </a>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

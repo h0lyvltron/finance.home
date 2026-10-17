@@ -10,21 +10,97 @@ import (
 )
 
 type CashFlowPoint struct {
-	Period     string
-	Label      string
-	Income     int64 // positive cents
-	Expense    int64 // positive cents (magnitude of spend)
-	Net        int64 // income - expense (signed)
-	InProgress bool
+	Period         string
+	Label          string
+	Income         int64 // positive cents
+	Expense        int64 // positive cents (magnitude of spend)
+	Net            int64 // income - expense (signed)
+	InProgress     bool
+	CompareIncome  int64
+	CompareExpense int64
+	CompareNet     int64
+	HasCompare     bool
 }
 
 type SegmentTotal struct {
-	Key        string
-	Label      string
-	Amount     int64 // signed (expense negative) or spend magnitude depending on caller
-	Count      int
-	DrillQuery string // query string fragment for /transactions
-	Color      string
+	Key           string
+	Label         string
+	Amount        int64 // signed (expense negative) or spend magnitude depending on caller
+	Count         int
+	DrillQuery    string // query string fragment for /transactions
+	Color         string
+	CompareAmount int64
+	HasCompare    bool
+	Delta         int64 // Amount - CompareAmount
+}
+
+// MergeCashFlowCompare attaches same-period-last-year values onto current points.
+// comparePoints should already be computed for the shifted date range.
+func MergeCashFlowCompare(current, compare []CashFlowPoint, grain string) []CashFlowPoint {
+	byPeriod := map[string]CashFlowPoint{}
+	for _, p := range compare {
+		byPeriod[p.Period] = p
+	}
+	out := make([]CashFlowPoint, len(current))
+	for i, p := range current {
+		out[i] = p
+		lyKey := shiftPeriodKey(p.Period, grain, -1)
+		if ly, ok := byPeriod[lyKey]; ok {
+			out[i].CompareIncome = ly.Income
+			out[i].CompareExpense = ly.Expense
+			out[i].CompareNet = ly.Net
+			out[i].HasCompare = true
+		}
+	}
+	return out
+}
+
+// MergeSegmentCompare attaches last-year amounts by segment key.
+func MergeSegmentCompare(current, compare []SegmentTotal) []SegmentTotal {
+	byKey := map[string]int64{}
+	for _, s := range compare {
+		byKey[s.Key] = s.Amount
+	}
+	out := make([]SegmentTotal, len(current))
+	for i, s := range current {
+		out[i] = s
+		if amt, ok := byKey[s.Key]; ok {
+			out[i].CompareAmount = amt
+			out[i].HasCompare = true
+			out[i].Delta = s.Amount - amt
+		}
+	}
+	return out
+}
+
+func shiftPeriodKey(key, grain string, years int) string {
+	switch grain {
+	case "day", "week":
+		t, err := time.Parse("2006-01-02", key)
+		if err != nil {
+			return key
+		}
+		return t.AddDate(years, 0, 0).Format("2006-01-02")
+	case "quarter":
+		// YYYY-Qn
+		var y, q int
+		if _, err := fmt.Sscanf(key, "%d-Q%d", &y, &q); err != nil {
+			return key
+		}
+		return fmt.Sprintf("%04d-Q%d", y+years, q)
+	case "year":
+		var y int
+		if _, err := fmt.Sscanf(key, "%d", &y); err != nil {
+			return key
+		}
+		return fmt.Sprintf("%04d", y+years)
+	default: // month YYYY-MM
+		t, err := time.Parse("2006-01", key)
+		if err != nil {
+			return key
+		}
+		return t.AddDate(years, 0, 0).Format("2006-01")
+	}
 }
 
 type PivotCell struct {

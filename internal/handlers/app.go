@@ -106,6 +106,19 @@ type pageData struct {
 	// personal dashboards (slice 6)
 	PersonalDash store.PersonalDashboard
 	DashEdit     bool
+	// polish (slice 7)
+	CompareMode     string // "" | "ly"
+	CompareCashFlow []store.CashFlowPoint
+	CompareSegs     []store.SegmentTotal
+	CompareIncome   int64
+	CompareExpense  int64
+	CompareTotal    int64
+	SoftDeleted     []store.SoftDeletedTx
+	Drafts          []models.DraftTransaction
+	CoachingPrefs   []store.CoachingPref
+	MonthStartDay   int
+	FewerNudges     bool
+	RetentionDays   int
 }
 
 type reconcileResult struct {
@@ -213,6 +226,19 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /undo", a.requireAuth(a.csrf(a.undo)))
 
 	mux.HandleFunc("GET /more", a.requireAuth(a.more))
+	mux.HandleFunc("GET /settings", a.requireAuth(a.settingsPage))
+	mux.HandleFunc("POST /settings", a.requireAuth(a.csrf(a.settingsPost)))
+	mux.HandleFunc("GET /settings/backup", a.requireAuth(a.settingsBackup))
+	mux.HandleFunc("GET /recycle", a.requireAuth(a.recyclePage))
+	mux.HandleFunc("POST /recycle/{id}/restore", a.requireAuth(a.csrf(a.recycleRestore)))
+	mux.HandleFunc("POST /coaching/snooze", a.requireAuth(a.csrf(a.coachingSnooze)))
+	mux.HandleFunc("POST /coaching/dismiss", a.requireAuth(a.csrf(a.coachingDismiss)))
+	mux.HandleFunc("POST /coaching/clear", a.requireAuth(a.csrf(a.coachingClear)))
+	mux.HandleFunc("POST /transactions/draft", a.requireAuth(a.csrf(a.draftSave)))
+	mux.HandleFunc("POST /transactions/draft/sync", a.requireAuth(a.csrf(a.draftSync)))
+	mux.HandleFunc("GET /drafts", a.requireAuth(a.draftsPage))
+	mux.HandleFunc("POST /drafts/{id}/promote", a.requireAuth(a.csrf(a.draftPromote)))
+	mux.HandleFunc("POST /drafts/{id}/delete", a.requireAuth(a.csrf(a.draftDelete)))
 	mux.HandleFunc("GET /categories", a.requireAuth(a.categoriesPage))
 	mux.HandleFunc("POST /categories", a.requireAuth(a.csrf(a.categoryCreate)))
 	mux.HandleFunc("GET /tags", a.requireAuth(a.tagsPage))

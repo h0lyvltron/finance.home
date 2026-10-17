@@ -1,6 +1,6 @@
 # Household finance
 
-Self-hosted, consumer-grade ledger for two people on a home LAN. Manual capture first; bank sync is out of scope.
+Self-hosted, consumer-grade ledger for two people on a home LAN. Manual capture + CSV; bank sync is out of scope.
 
 **Stack:** Go (`net/http`, `html/template`), Datastar, SQLite (`modernc.org/sqlite`), Chart.js, Docker Compose.
 
@@ -17,28 +17,74 @@ Optional env:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ADDR` | `:3847` | Listen address |
-| `DATA_DIR` | `./data` | Data directory |
+| `DATA_DIR` | `./data` | Data directory (backups land in `$DATA_DIR/backups`) |
 | `DB_PATH` | `$DATA_DIR/finance.db` | SQLite path |
 | `SECURE_COOKIE` | `false` | Set `true` behind HTTPS |
 
 ## LAN with Docker Compose
 
+On the home machine (Linux or any Docker host on your Wi‑Fi):
+
 ```bash
+git clone https://github.com/h0lyvltron/finance.home.git
+cd finance.home
 docker compose up -d --build
 ```
 
-App: `http://<host-lan-ip>:3847`. SQLite lives in the `finance_data` volume.
+Then open `http://<host-lan-ip>:3847` from phones and laptops on the same network.
 
-## What works (slices 0–2)
+Find the LAN IP:
+
+```bash
+# Linux
+hostname -I | awk '{print $1}'
+# macOS
+ipconfig getifaddr en0
+```
+
+SQLite lives in the named Docker volume `finance_data` (not on SMB/NFS). Restart policy is `unless-stopped`.
+
+```bash
+docker compose logs -f finance   # follow logs
+docker compose down              # stop (volume kept)
+```
+
+**Firewall:** allow TCP `3847` from the LAN only if your host firewall blocks it. Do not publish the port to the public internet.
+
+**PWA:** installable on the home screen over `http://` LAN IPs as a normal site; some install features that need public HTTPS may be limited.
+
+**Away-from-home access** (Tailscale / WireGuard) is deferred — not required for this generation.
+
+### Backup and restore
+
+In the app: **More → Settings → Download backup** (`VACUUM INTO` snapshot).
+
+Restore from CLI:
+
+```bash
+docker compose down
+# Replace the DB inside the volume, e.g.:
+docker run --rm -v finance_data:/data -v "$PWD":/backup alpine \
+  cp /backup/finance-backup-YYYYMMDD-HHMMSS.db /data/finance.db
+docker compose up -d
+```
+
+Local (non-Docker): stop the server, replace `$DB_PATH` with the backup file, start again.
+
+## What works (slices 0–7)
 
 - First-run setup, cookie sessions, bcrypt, CSRF
-- Accounts (checking/savings/cash/credit/loan) with balance anchors
-- Categories (starter pack), tags, payees
-- Transactions, splits, transfers, soft-delete + undo toast
-- Quick-add sheet, phone-friendly register, running balance
-- Basic reconcile (statement date + ending balance)
-- **Import:** CSV mapping profiles, debit/credit detection, paginated preview wizard, payee rules (first match wins), duplicate advisory, manual↔import merge (±5 days), transfer pairing, needs-review queue + nav badge, batch undo, CSV export
+- Accounts (checking/savings/cash/credit/loan) with balance anchors + reconcile
+- Categories, tags, payees; transactions, splits, transfers
+- Soft-delete + 30‑minute undo toast + **recycle bin** (30‑day restore)
+- Quick-add (phone sheet), offline localStorage queue → sync, durable **drafts**
+- CSV import: mapping profiles, rules, preview, match/merge, review queue, batch undo, export
+- Shared filters; Cash flow + Spending Explore (**vs last year**); pivot; net worth; budget vs actual; savings rate
+- Plan: budgets, schedules/bills, left to spend; Goals; monthly recap (“money date”)
+- Personal Home dashboards (widget catalog, reorder, S/M/L, range presets)
+- Coaching: Home insights with snooze/dismiss + global **fewer nudges**
+- Settings: month-start day (mid-month pay cycles), backup download
 
-## Deferred
+## Out of this generation
 
-Reports/dashboard builder, budgets/coaching, PIN unlock, nightly backups UI — later slices per the product spec.
+Bank aggregation, investments, multi-currency FX, receipt OCR, native apps, public OIDC, Tailscale/WireGuard, YNAB envelopes, OFX/QIF until needed, debt payoff planner, free-form dashboard grid, per-rule coaching settings page.

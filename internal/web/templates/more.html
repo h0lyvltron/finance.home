@@ -15,9 +15,21 @@
   {{template "flash" .}}
 
   <h1>More</h1>
-  <p class="muted">Categories, tags, and payees for the shared ledger.</p>
+  <p class="muted">Categories, tags, settings, and the shared ledger.</p>
 
   <div class="panel" style="margin-top:1rem">
+    <a class="list-row" href="/settings" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Settings</div><div class="tiny muted">Month start, coaching density, backup download</div></div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/recycle" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Recycle bin</div><div class="tiny muted">Restore soft-deleted transactions</div></div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/drafts" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Drafts</div><div class="tiny muted">Offline / saved quick-add drafts</div></div>
+      <span class="faint">›</span>
+    </a>
     <a class="list-row" href="/plan" style="color:inherit;text-decoration:none">
       <div><div style="font-weight:600">Plan</div><div class="tiny muted">Budgets, left to spend, bills</div></div>
       <span class="faint">›</span>

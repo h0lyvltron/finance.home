@@ -166,9 +166,9 @@ func (s *Store) SavingsRate(f QueryFilter, h *models.Household, now time.Time) (
 	return out, nil
 }
 
-// MonthIncomeExpense returns cash-flow totals for one calendar month.
+// MonthIncomeExpense returns cash-flow totals for one fiscal month.
 func (s *Store) MonthIncomeExpense(ym string, h *models.Household) (income, expense int64, err error) {
-	from, to, err := monthBounds(ym)
+	from, to, err := FiscalMonthBounds(h, ym)
 	if err != nil {
 		return 0, 0, err
 	}

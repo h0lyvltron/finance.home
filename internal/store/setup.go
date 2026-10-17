@@ -10,13 +10,23 @@ import (
 
 func (s *Store) Household() (*models.Household, error) {
 	h := &models.Household{}
+	var fewer int
 	err := s.DB.QueryRow(`SELECT id, name, currency, timezone, week_starts,
+		COALESCE(month_start_day,1), COALESCE(fewer_nudges,0),
 		COALESCE(expected_income_cents,0), COALESCE(savings_target_cents,0)
 		FROM households WHERE id = 1`).
 		Scan(&h.ID, &h.Name, &h.Currency, &h.Timezone, &h.WeekStarts,
+			&h.MonthStartDay, &fewer,
 			&h.ExpectedIncomeCents, &h.SavingsTargetCents)
 	if err != nil {
 		return nil, err
+	}
+	h.FewerNudges = fewer != 0
+	if h.MonthStartDay < 1 {
+		h.MonthStartDay = 1
+	}
+	if h.MonthStartDay > 28 {
+		h.MonthStartDay = 28
 	}
 	return h, nil
 }
@@ -24,6 +34,23 @@ func (s *Store) Household() (*models.Household, error) {
 func (s *Store) UpdateHouseholdPlan(expectedIncome, savingsTarget int64) error {
 	_, err := s.DB.Exec(`UPDATE households SET expected_income_cents=?, savings_target_cents=? WHERE id=1`,
 		expectedIncome, savingsTarget)
+	return err
+}
+
+// UpdateHouseholdSettings updates calendar / coaching household prefs.
+func (s *Store) UpdateHouseholdSettings(monthStartDay int, fewerNudges bool) error {
+	if monthStartDay < 1 {
+		monthStartDay = 1
+	}
+	if monthStartDay > 28 {
+		monthStartDay = 28
+	}
+	fewer := 0
+	if fewerNudges {
+		fewer = 1
+	}
+	_, err := s.DB.Exec(`UPDATE households SET month_start_day=?, fewer_nudges=? WHERE id=1`,
+		monthStartDay, fewer)
 	return err
 }
 

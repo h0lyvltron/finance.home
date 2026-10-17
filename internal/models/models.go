@@ -6,6 +6,8 @@ type Household struct {
 	Currency            string
 	Timezone            string
 	WeekStarts          int
+	MonthStartDay       int   // 1–28; mid-month pay cycles (default 1)
+	FewerNudges         bool  // global coaching density: fewer Home insights
 	ExpectedIncomeCents int64 // monthly expected income for left-to-spend
 	SavingsTargetCents  int64 // monthly savings contribution target
 }
@@ -235,13 +237,32 @@ type ScheduleInstance struct {
 }
 
 type CoachingInsight struct {
-	Kind     string // pace|review|bills|positive
+	Kind     string // pace|review|bills|positive|goal|spike|card
 	Tone     string // warn|ok|info
 	Title    string
 	Detail   string
 	Href     string
 	Amount   int64 // optional cents for display
 	ShowAmt  bool
+}
+
+// DraftTransaction is a durable quick-add draft (offline queue / Save draft).
+type DraftTransaction struct {
+	ID              int64
+	PersonID        int64
+	AccountID       *int64
+	CategoryID      *int64
+	PayeeName       string
+	Notes           string
+	Amount          int64
+	TransactionDate string
+	Person          string
+	Kind            string
+	ClientKey       string
+	CreatedAt       string
+	UpdatedAt       string
+	AccountName     string
+	CategoryName    string
 }
 
 type LeftToSpend struct {

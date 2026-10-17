@@ -146,19 +146,33 @@
         <div class="panel insights-panel">
           <div class="spread">
             <h2 style="margin:0">Insights</h2>
-            <span class="tiny faint">Up to 3</span>
+            <a class="tiny faint" href="/settings">{{if $.FewerNudges}}Fewer nudges on{{else}}Density{{end}}</a>
           </div>
           {{if not $w.Insights}}
           <p class="muted small" style="margin:.75rem 0 0">No insights right now.</p>
           {{else}}
             {{range $w.Insights}}
-            <a class="insight insight-{{.Tone}}" href="{{.Href}}">
-              <div>
+            <div class="insight insight-{{.Tone}}">
+              <a href="{{.Href}}" class="insight-body" style="color:inherit;text-decoration:none">
                 <div class="insight-title">{{.Title}}</div>
                 <div class="tiny muted">{{.Detail}}</div>
+              </a>
+              <div class="insight-actions">
+                <form method="post" action="/coaching/snooze">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="kind" value="{{.Kind}}">
+                  <input type="hidden" name="days" value="7">
+                  <input type="hidden" name="return" value="/">
+                  <button class="btn btn-sm btn-ghost" type="submit" title="Snooze 7 days">Snooze</button>
+                </form>
+                <form method="post" action="/coaching/dismiss">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="kind" value="{{.Kind}}">
+                  <input type="hidden" name="return" value="/">
+                  <button class="btn btn-sm btn-ghost" type="submit" title="Dismiss this type">Dismiss</button>
+                </form>
               </div>
-              <span class="faint">›</span>
-            </a>
+            </div>
             {{end}}
           {{end}}
         </div>

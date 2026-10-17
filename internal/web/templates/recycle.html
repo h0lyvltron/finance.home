@@ -1,0 +1,42 @@
+{{define "recycle"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Recycle bin — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/settings">← Settings</a></header>
+  <h1>Recycle bin</h1>
+  <p class="muted">Soft-deleted transactions stay restorable for {{.RetentionDays}} days. Undo toasts cover the first 30 minutes.</p>
+
+  {{if eq .Flash "restored"}}<div class="alert alert-ok">Restored.</div>{{end}}
+
+  <div class="panel" style="margin-top:1rem">
+    {{if not .SoftDeleted}}
+    <p class="muted">Nothing in the bin.</p>
+    {{else}}
+    {{range .SoftDeleted}}
+    <div class="list-row" style="align-items:flex-start">
+      <div class="grow">
+        <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+        <div class="tiny muted">{{.TransactionDate}} · {{.AccountName}}{{if .CategoryName}} · {{.CategoryName}}{{end}}</div>
+        <div class="tiny faint">{{.DaysLeft}}d left</div>
+      </div>
+      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+      <form method="post" action="/recycle/{{.ID}}/restore" style="margin-left:.5rem">
+        {{template "csrf" $}}
+        <button class="btn btn-sm btn-ghost" type="submit">Restore</button>
+      </form>
+    </div>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
+{{end}}

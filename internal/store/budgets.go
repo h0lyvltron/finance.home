@@ -10,9 +10,28 @@ import (
 	"finance.home/internal/models"
 )
 
-// YearMonth returns YYYY-MM in the household timezone.
+// MonthStartDay returns the household month-start day (1–28), default 1.
+func MonthStartDay(h *models.Household) int {
+	if h == nil || h.MonthStartDay < 1 {
+		return 1
+	}
+	if h.MonthStartDay > 28 {
+		return 28
+	}
+	return h.MonthStartDay
+}
+
+// YearMonth returns the fiscal YYYY-MM in the household timezone (respects month_start_day).
 func YearMonth(h *models.Household, now time.Time) string {
 	now = localize(h, now)
+	start := MonthStartDay(h)
+	if start <= 1 {
+		return now.Format("2006-01")
+	}
+	if now.Day() < start {
+		prev := now.AddDate(0, -1, 0)
+		return prev.Format("2006-01")
+	}
 	return now.Format("2006-01")
 }
 
@@ -26,13 +45,43 @@ func localize(h *models.Household, now time.Time) time.Time {
 }
 
 func monthBounds(ym string) (from, to string, err error) {
+	return monthBoundsWithStart(ym, 1)
+}
+
+// FiscalMonthBounds returns inclusive date bounds for a fiscal YYYY-MM using month_start_day.
+func FiscalMonthBounds(h *models.Household, ym string) (from, to string, err error) {
+	return monthBoundsWithStart(ym, MonthStartDay(h))
+}
+
+func monthBoundsWithStart(ym string, startDay int) (from, to string, err error) {
 	t, err := time.Parse("2006-01", ym)
 	if err != nil {
 		return "", "", fmt.Errorf("bad year_month %q", ym)
 	}
-	from = t.Format("2006-01-02")
-	to = t.AddDate(0, 1, -1).Format("2006-01-02")
-	return from, to, nil
+	if startDay <= 1 {
+		from = t.Format("2006-01-02")
+		to = t.AddDate(0, 1, -1).Format("2006-01-02")
+		return from, to, nil
+	}
+	clamp := func(y int, m time.Month, day int) time.Time {
+		last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		if day > last {
+			day = last
+		}
+		return time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
+	}
+	fromT := clamp(t.Year(), t.Month(), startDay)
+	next := t.AddDate(0, 1, 0)
+	toT := clamp(next.Year(), next.Month(), startDay).AddDate(0, 0, -1)
+	return fromT.Format("2006-01-02"), toT.Format("2006-01-02"), nil
+}
+
+func (s *Store) monthBoundsFor(ym string) (from, to string, err error) {
+	h, err := s.Household()
+	if err != nil {
+		return monthBounds(ym)
+	}
+	return FiscalMonthBounds(h, ym)
 }
 
 func prevYearMonth(ym string) (string, error) {
@@ -163,7 +212,7 @@ func (s *Store) EnsureMonthBudgets(ym string) error {
 
 // categorySpendMap returns positive expense magnitude by category_id for the month.
 func (s *Store) categorySpendMap(ym string) (map[int64]int64, error) {
-	from, to, err := monthBounds(ym)
+	from, to, err := s.monthBoundsFor(ym)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +465,7 @@ func (s *Store) BudgetHealthSummary(ym string) (models.BudgetHealth, error) {
 
 // FlexibleSpentMonth sums spend in flexible expense categories (actuals).
 func (s *Store) FlexibleSpentMonth(ym string) (int64, error) {
-	from, to, err := monthBounds(ym)
+	from, to, err := s.monthBoundsFor(ym)
 	if err != nil {
 		return 0, err
 	}
@@ -469,7 +518,7 @@ func (s *Store) PaceInsight(h *models.Household, ym string, now time.Time) *mode
 		return nil
 	}
 	now = localize(h, now)
-	_, monthEnd, err := monthBounds(ym)
+	_, monthEnd, err := FiscalMonthBounds(h, ym)
 	if err != nil {
 		return nil
 	}

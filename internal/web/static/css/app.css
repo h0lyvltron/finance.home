@@ -487,9 +487,9 @@ h3 { font-size: 1.05rem; }
 .num-strong.neg { color: var(--danger); }
 .insight {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: .75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .35rem;
   padding: .85rem 0;
   border-bottom: 1px solid var(--line);
   color: inherit;
@@ -498,10 +498,25 @@ h3 { font-size: 1.05rem; }
 }
 .insight:last-child { border-bottom: 0; }
 .insight:hover { text-decoration: none; }
+.insight-body { display: block; }
 .insight-title { font-weight: 650; }
 .insight-warn .insight-title { color: var(--warn); }
 .insight-ok .insight-title { color: var(--ok); }
 .insight-info .insight-title { color: var(--accent); }
+.insight-actions {
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+}
+.code-block {
+  margin: .5rem 0 0;
+  padding: .65rem .75rem;
+  background: var(--bg-muted);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: .78rem;
+  line-height: 1.45;
+}
 .budget-list { display: flex; flex-direction: column; }
 .budget-row {
   display: grid;

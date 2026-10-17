@@ -117,11 +117,22 @@ func (f *QueryFilter) ResolveDates(h *models.Household, now time.Time) {
 		f.DateTo = today.Format("2006-01-02")
 		f.DateFrom = today.AddDate(0, 0, -89).Format("2006-01-02")
 	case "last_month":
-		firstThis := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
-		lastPrev := firstThis.AddDate(0, 0, -1)
-		firstPrev := time.Date(lastPrev.Year(), lastPrev.Month(), 1, 0, 0, 0, 0, today.Location())
-		f.DateFrom = firstPrev.Format("2006-01-02")
-		f.DateTo = lastPrev.Format("2006-01-02")
+		ym := YearMonth(h, today)
+		t, err := time.Parse("2006-01", ym)
+		if err != nil {
+			t = time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
+		}
+		prevYM := t.AddDate(0, -1, 0).Format("2006-01")
+		from, to, err := FiscalMonthBounds(h, prevYM)
+		if err != nil {
+			firstThis := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
+			lastPrev := firstThis.AddDate(0, 0, -1)
+			firstPrev := time.Date(lastPrev.Year(), lastPrev.Month(), 1, 0, 0, 0, 0, today.Location())
+			f.DateFrom = firstPrev.Format("2006-01-02")
+			f.DateTo = lastPrev.Format("2006-01-02")
+		} else {
+			f.DateFrom, f.DateTo = from, to
+		}
 	case "ytd", "this_year":
 		f.DateFrom = time.Date(today.Year(), 1, 1, 0, 0, 0, 0, today.Location()).Format("2006-01-02")
 		f.DateTo = today.Format("2006-01-02")
@@ -131,15 +142,59 @@ func (f *QueryFilter) ResolveDates(h *models.Household, now time.Time) {
 		f.DateFrom = today.AddDate(-1, 0, 1).Format("2006-01-02")
 	case "this_month", "":
 		f.DatePreset = "this_month"
-		first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
-		f.DateFrom = first.Format("2006-01-02")
-		f.DateTo = today.Format("2006-01-02")
+		ym := YearMonth(h, today)
+		from, to, err := FiscalMonthBounds(h, ym)
+		if err != nil {
+			first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
+			f.DateFrom = first.Format("2006-01-02")
+			f.DateTo = today.Format("2006-01-02")
+		} else {
+			f.DateFrom = from
+			todayStr := today.Format("2006-01-02")
+			if to > todayStr {
+				f.DateTo = todayStr
+			} else {
+				f.DateTo = to
+			}
+		}
 	default:
-		first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
-		f.DateFrom = first.Format("2006-01-02")
-		f.DateTo = today.Format("2006-01-02")
+		ym := YearMonth(h, today)
+		from, to, err := FiscalMonthBounds(h, ym)
+		if err != nil {
+			first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
+			f.DateFrom = first.Format("2006-01-02")
+			f.DateTo = today.Format("2006-01-02")
+		} else {
+			f.DateFrom = from
+			todayStr := today.Format("2006-01-02")
+			if to > todayStr {
+				f.DateTo = todayStr
+			} else {
+				f.DateTo = to
+			}
+		}
 		f.DatePreset = "this_month"
 	}
+}
+
+// ShiftFilterLastYear returns a clone with DateFrom/DateTo moved back one calendar year.
+func ShiftFilterLastYear(f QueryFilter) QueryFilter {
+	out := f.Clone()
+	out.DatePreset = "custom"
+	out.DateFrom = shiftDateYear(f.DateFrom, -1)
+	out.DateTo = shiftDateYear(f.DateTo, -1)
+	return out
+}
+
+func shiftDateYear(iso string, years int) string {
+	if iso == "" {
+		return ""
+	}
+	t, err := time.Parse("2006-01-02", iso)
+	if err != nil {
+		return iso
+	}
+	return t.AddDate(years, 0, 0).Format("2006-01-02")
 }
 
 // EncodeQuery writes filter fields into url.Values (for URL state / links).

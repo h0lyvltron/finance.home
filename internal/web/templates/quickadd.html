@@ -8,12 +8,13 @@
     <button class="btn btn-sm btn-ghost" type="button" data-on:click="$quickAddOpen = false">Close</button>
   </div>
 
-  <form class="stack" method="post" action="/transactions/quick"
+  <form class="stack" id="qa-form" method="post" action="/transactions/quick"
         data-on:submit="@post('/transactions/quick', {contentType: 'form'})">
     {{template "csrf" .}}
     <input type="hidden" name="kind" data-attr:value="$qaKind" value="expense">
     <input type="hidden" name="date" data-attr:value="$qaDate" value="{{today}}">
     <input type="hidden" name="and_another" id="qa-and-another" value="0">
+    <input type="hidden" name="client_key" id="qa-client-key" value="">
 
     <div class="row">
       <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'expense'"
@@ -87,7 +88,15 @@
       <button class="btn btn-ghost grow" type="submit"
               data-on:click="document.getElementById('qa-and-another').value='1'">Save &amp; another</button>
     </div>
+    <div class="row">
+      <button class="btn btn-ghost grow" type="submit" formaction="/transactions/draft"
+              formmethod="post"
+              data-on:click="event.preventDefault(); window.__qaSaveDraft && window.__qaSaveDraft()">Save draft</button>
+      <a class="btn btn-ghost grow" href="/drafts" style="text-align:center">Drafts</a>
+    </div>
     <div id="qa-error"></div>
+    <div id="qa-offline" class="tiny muted" hidden></div>
   </form>
 </aside>
+<script src="/static/js/offline-queue.js" defer></script>
 {{end}}

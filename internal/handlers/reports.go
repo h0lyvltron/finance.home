@@ -22,6 +22,13 @@ func (a *App) withFilterOptions(d *pageData) {
 	d.Tags = tags
 }
 
+func compareMode(r *http.Request) string {
+	if strings.TrimSpace(r.FormValue("compare")) == "ly" {
+		return "ly"
+	}
+	return ""
+}
+
 func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
 	d.Nav = "explore"
@@ -44,10 +51,23 @@ func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 		}
 	}
 
-	segs, grand, err := a.Store.SpendingExplore(f, groupBy, topN, a.household(), time.Now())
+	h := a.household()
+	now := time.Now()
+	segs, grand, err := a.Store.SpendingExplore(f, groupBy, topN, h, now)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
+	}
+
+	d.CompareMode = compareMode(r)
+	if d.CompareMode == "ly" && f.DateFrom != "" && f.DateTo != "" {
+		ly := store.ShiftFilterLastYear(f)
+		lySegs, lyGrand, err := a.Store.SpendingExplore(ly, groupBy, 50, h, now)
+		if err == nil {
+			segs = store.MergeSegmentCompare(segs, lySegs)
+			d.CompareTotal = lyGrand
+			d.CompareSegs = lySegs
+		}
 	}
 
 	fv := a.filterViewFor(r, sess, f, "/explore", "", groupBy)
@@ -55,7 +75,7 @@ func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 	d.GroupBy = groupBy
 	d.Segments = segs
 	d.ReportTotal = grand
-	d.ChartJSON = template.JS(chartJSONHorizontalBar(segs))
+	d.ChartJSON = template.JS(chartJSONHorizontalBarCompare(segs, d.CompareMode == "ly"))
 	d.DrillBase = "/transactions"
 
 	a.Render.RenderHTTP(w, "explore", d)
@@ -76,7 +96,9 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 	if grain == "" {
 		grain = "month"
 	}
-	points, err := a.Store.CashFlow(f, grain, a.household(), time.Now())
+	h := a.household()
+	now := time.Now()
+	points, err := a.Store.CashFlow(f, grain, h, now)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -87,6 +109,22 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 		expense += p.Expense
 		net += p.Net
 	}
+
+	d.CompareMode = compareMode(r)
+	if d.CompareMode == "ly" && f.DateFrom != "" && f.DateTo != "" {
+		ly := store.ShiftFilterLastYear(f)
+		lyPoints, err := a.Store.CashFlow(ly, grain, h, now)
+		if err == nil {
+			points = store.MergeCashFlowCompare(points, lyPoints, grain)
+			d.CompareCashFlow = lyPoints
+			for _, p := range lyPoints {
+				d.CompareIncome += p.Income
+				d.CompareExpense += p.Expense
+				d.CompareTotal += p.Net
+			}
+		}
+	}
+
 	fv := a.filterViewFor(r, sess, f, "/reports/cashflow", grain, "")
 	d.Filter = fv
 	d.Grain = grain
@@ -94,7 +132,7 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 	d.IncomeTotal = income
 	d.ExpenseTotal = expense
 	d.ReportTotal = net
-	d.ChartJSON = template.JS(chartJSONCashFlow(points))
+	d.ChartJSON = template.JS(chartJSONCashFlowCompare(points, d.CompareMode == "ly"))
 	d.DrillBase = "/transactions"
 
 	a.Render.RenderHTTP(w, "cashflow", d)
@@ -138,29 +176,46 @@ func (a *App) pivotPage(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 }
 
 func chartJSONHorizontalBar(segs []store.SegmentTotal) string {
+	return chartJSONHorizontalBarCompare(segs, false)
+}
+
+func chartJSONHorizontalBarCompare(segs []store.SegmentTotal, withCompare bool) string {
 	labels := make([]string, len(segs))
 	data := make([]float64, len(segs))
+	compare := make([]float64, len(segs))
 	for i, s := range segs {
 		labels[i] = s.Label
 		data[i] = float64(s.Amount) / 100
+		if s.HasCompare {
+			compare[i] = float64(s.CompareAmount) / 100
+		}
+	}
+	datasets := []map[string]any{{
+		"label":           "Spend",
+		"data":            data,
+		"backgroundColor": "rgba(47, 93, 80, 0.75)",
+		"borderRadius":    6,
+	}}
+	if withCompare {
+		datasets = append(datasets, map[string]any{
+			"label":           "Last year",
+			"data":            compare,
+			"backgroundColor": "rgba(120, 120, 110, 0.45)",
+			"borderRadius":    6,
+		})
 	}
 	cfg := map[string]any{
 		"type": "bar",
 		"data": map[string]any{
-			"labels": labels,
-			"datasets": []map[string]any{{
-				"label":           "Spend",
-				"data":            data,
-				"backgroundColor": "rgba(47, 93, 80, 0.75)",
-				"borderRadius":    6,
-			}},
+			"labels":   labels,
+			"datasets": datasets,
 		},
 		"options": map[string]any{
-			"indexAxis": "y",
-			"responsive": true,
+			"indexAxis":          "y",
+			"responsive":         true,
 			"maintainAspectRatio": false,
 			"plugins": map[string]any{
-				"legend": map[string]any{"display": false},
+				"legend": map[string]any{"display": withCompare},
 			},
 			"scales": map[string]any{
 				"x": map[string]any{"beginAtZero": true},
@@ -172,9 +227,15 @@ func chartJSONHorizontalBar(segs []store.SegmentTotal) string {
 }
 
 func chartJSONCashFlow(points []store.CashFlowPoint) string {
+	return chartJSONCashFlowCompare(points, false)
+}
+
+func chartJSONCashFlowCompare(points []store.CashFlowPoint, withCompare bool) string {
 	labels := make([]string, len(points))
 	income := make([]float64, len(points))
 	expense := make([]float64, len(points))
+	lyIncome := make([]float64, len(points))
+	lyExpense := make([]float64, len(points))
 	for i, p := range points {
 		labels[i] = p.Label
 		if p.InProgress {
@@ -182,18 +243,29 @@ func chartJSONCashFlow(points []store.CashFlowPoint) string {
 		}
 		income[i] = float64(p.Income) / 100
 		expense[i] = float64(p.Expense) / 100
+		if p.HasCompare {
+			lyIncome[i] = float64(p.CompareIncome) / 100
+			lyExpense[i] = float64(p.CompareExpense) / 100
+		}
+	}
+	datasets := []map[string]any{
+		{"label": "Income", "data": income, "backgroundColor": "rgba(47, 93, 80, 0.8)"},
+		{"label": "Expense", "data": expense, "backgroundColor": "rgba(139, 58, 58, 0.75)"},
+	}
+	if withCompare {
+		datasets = append(datasets,
+			map[string]any{"label": "Income LY", "data": lyIncome, "backgroundColor": "rgba(47, 93, 80, 0.35)"},
+			map[string]any{"label": "Expense LY", "data": lyExpense, "backgroundColor": "rgba(139, 58, 58, 0.35)"},
+		)
 	}
 	cfg := map[string]any{
 		"type": "bar",
 		"data": map[string]any{
-			"labels": labels,
-			"datasets": []map[string]any{
-				{"label": "Income", "data": income, "backgroundColor": "rgba(47, 93, 80, 0.8)"},
-				{"label": "Expense", "data": expense, "backgroundColor": "rgba(139, 58, 58, 0.75)"},
-			},
+			"labels":   labels,
+			"datasets": datasets,
 		},
 		"options": map[string]any{
-			"responsive": true,
+			"responsive":          true,
 			"maintainAspectRatio": false,
 			"scales": map[string]any{
 				"x": map[string]any{"stacked": false},

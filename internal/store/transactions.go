@@ -239,7 +239,8 @@ func (s *Store) SoftDeleteTransaction(id, personID int64) (undoID string, err er
 
 	undoID = uuid.NewString()
 	payload, _ := json.Marshal(map[string]any{"transaction_ids": ids})
-	exp := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)
+	// 30-minute undo toast window; recycle bin retains 30 days for restore.
+	exp := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano)
 	_, err = tx.Exec(`INSERT INTO undo_ops(id, kind, payload, expires_at, created_by) VALUES (?,?,?,?,?)`,
 		undoID, "soft_delete_tx", string(payload), exp, personID)
 	if err != nil {

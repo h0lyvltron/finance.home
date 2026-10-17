@@ -1,0 +1,53 @@
+{{define "drafts"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Drafts — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/settings">← Settings</a></header>
+  <h1>Drafts</h1>
+  <p class="muted">Saved quick-add drafts and offline queue items waiting to post.</p>
+
+  {{if eq .Flash "saved"}}<div class="alert alert-ok">Draft saved.</div>{{end}}
+  {{if eq .Flash "posted"}}<div class="alert alert-ok">Posted to the ledger.</div>{{end}}
+  {{if eq .Flash "deleted"}}<div class="alert alert-ok">Draft discarded.</div>{{end}}
+
+  <div class="panel" style="margin-top:1rem">
+    {{if not .Drafts}}
+    <p class="muted">No drafts. Use <strong>Save draft</strong> on quick-add, or capture while offline.</p>
+    {{else}}
+    {{range .Drafts}}
+    <div class="list-row" style="align-items:flex-start;flex-wrap:wrap;gap:.5rem">
+      <div class="grow">
+        <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+        <div class="tiny muted">
+          {{if .TransactionDate}}{{.TransactionDate}}{{else}}no date{{end}}
+          {{if .AccountName}} · {{.AccountName}}{{end}}
+          {{if .CategoryName}} · {{.CategoryName}}{{end}}
+        </div>
+      </div>
+      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+      <form method="post" action="/drafts/{{.ID}}/promote">
+        {{template "csrf" $}}
+        <button class="btn btn-sm btn-primary" type="submit">Post</button>
+      </form>
+      <form method="post" action="/drafts/{{.ID}}/delete">
+        {{template "csrf" $}}
+        <button class="btn btn-sm btn-ghost" type="submit">Discard</button>
+      </form>
+    </div>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

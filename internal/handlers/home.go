@@ -27,6 +27,9 @@ func (a *App) home(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d.PersonalDash = dash
 	d.YearMonth = dash.YearMonth
 	d.ReviewCount = dash.ReviewCount
+	if d.Household != nil {
+		d.FewerNudges = d.Household.FewerNudges
+	}
 
 	// Keep legacy fields populated for any shared partials
 	for _, wgt := range dash.Widgets {
