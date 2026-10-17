@@ -1,0 +1,164 @@
+{{define "more"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>More — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <h1>More</h1>
+  <p class="muted">Categories, tags, and payees for the shared ledger.</p>
+
+  <div class="panel" style="margin-top:1rem">
+    <a class="list-row" href="/categories" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Categories</div><div class="tiny muted">Expense &amp; income trees</div></div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/tags" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Tags</div><div class="tiny muted">Flexible labels</div></div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/payees" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Payees</div><div class="tiny muted">Directory &amp; defaults</div></div>
+      <span class="faint">›</span>
+    </a>
+  </div>
+
+  <p class="tiny faint" style="margin-top:1.5rem">Reports, budgets, import, and coaching ship in later slices.</p>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
+
+{{define "categories"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Categories</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/more">← More</a></header>
+  <div class="spread"><h1 style="margin:0">Categories</h1></div>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  {{if .Flash}}<div class="alert alert-ok">{{.Flash}}</div>{{end}}
+
+  <form method="post" action="/categories" class="panel stack" style="margin:1rem 0">
+    {{template "csrf" .}}
+    <h2 style="margin:0">Add category</h2>
+    <div class="field"><label>Name</label><input name="name" required maxlength="80"></div>
+    <div class="field"><label>Kind</label>
+      <select name="kind"><option value="expense">Expense</option><option value="income">Income</option></select>
+    </div>
+    <div class="field"><label>Fixed / flexible</label>
+      <select name="fixed_flexible">
+        <option value="flexible">Flexible</option>
+        <option value="fixed">Fixed</option>
+        <option value="">—</option>
+      </select>
+    </div>
+    <div class="field"><label>Parent (optional)</label>
+      <select name="parent_id">
+        <option value="">Top level</option>
+        {{range .Categories}}
+        {{if not .ParentID}}
+        <option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>
+        {{end}}
+        {{end}}
+      </select>
+    </div>
+    <button class="btn btn-primary" type="submit">Add</button>
+  </form>
+
+  <div class="panel">
+    {{range .Categories}}
+    {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
+    <div class="list-row">
+      <div>
+        <div style="font-weight:600">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</div>
+        <div class="tiny muted">{{.Kind}}{{if .FixedFlexible}} · {{.FixedFlexible}}{{end}}{{if .Protected}} · protected{{end}}</div>
+      </div>
+    </div>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "tags"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tags</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/more">← More</a></header>
+  <h1>Tags</h1>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  <form method="post" action="/tags" class="panel stack">
+    {{template "csrf" .}}
+    <div class="field"><label>New tag</label><input name="name" required maxlength="40"></div>
+    <button class="btn btn-primary" type="submit">Add tag</button>
+  </form>
+  <div class="panel" style="margin-top:1rem">
+    {{if not .Tags}}<p class="muted">No tags yet.</p>{{end}}
+    <div class="row">
+      {{range .Tags}}<span class="chip">{{.Name}}</span>{{end}}
+    </div>
+  </div>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "payees"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Payees</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/more">← More</a></header>
+  <h1>Payees</h1>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  <form method="post" action="/payees" class="panel stack">
+    {{template "csrf" .}}
+    <div class="field"><label>New payee</label><input name="name" required maxlength="120"></div>
+    <button class="btn btn-primary" type="submit">Add payee</button>
+  </form>
+  <div class="panel" style="margin-top:1rem">
+    {{if not .Payees}}<p class="muted">Payees appear as you capture transactions.</p>{{end}}
+    {{range .Payees}}
+    <div class="list-row">
+      <div style="font-weight:600">{{.Name}}</div>
+      <div class="tiny muted">{{.LastUsedAt}}</div>
+    </div>
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
+{{end}}

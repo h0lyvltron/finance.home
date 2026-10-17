@@ -1,0 +1,66 @@
+{{define "setup"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Set up your household</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell" style="padding-top:2rem;padding-bottom:2rem">
+  <p class="tiny faint">First run</p>
+  <h1>Set up your household</h1>
+  <p class="muted">One shared ledger for two people. Passwords stay on your home server.</p>
+
+  {{if .Error}}
+  <div class="alert alert-error" style="margin:1rem 0">{{.Error}}</div>
+  {{end}}
+
+  <form method="post" action="/setup" class="panel stack" style="margin-top:1.25rem">
+    <div class="field">
+      <label for="household_name">Household name</label>
+      <input id="household_name" name="household_name" required maxlength="80" value="{{.HouseholdName}}" placeholder="The Riveras">
+    </div>
+    <div class="field">
+      <label for="currency">Currency</label>
+      <select id="currency" name="currency">
+        <option value="USD" {{if eq .Currency "USD"}}selected{{end}}>USD</option>
+        <option value="EUR" {{if eq .Currency "EUR"}}selected{{end}}>EUR</option>
+        <option value="GBP" {{if eq .Currency "GBP"}}selected{{end}}>GBP</option>
+        <option value="CAD" {{if eq .Currency "CAD"}}selected{{end}}>CAD</option>
+        <option value="AUD" {{if eq .Currency "AUD"}}selected{{end}}>AUD</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="timezone">Timezone</label>
+      <input id="timezone" name="timezone" value="{{if .Timezone}}{{.Timezone}}{{else}}America/New_York{{end}}" placeholder="America/New_York">
+    </div>
+
+    <h2 style="margin-top:.5rem">Person A</h2>
+    <div class="field">
+      <label for="person_a_name">Name</label>
+      <input id="person_a_name" name="person_a_name" required maxlength="60" value="{{.PersonAName}}">
+    </div>
+    <div class="field">
+      <label for="person_a_pass">Password</label>
+      <input id="person_a_pass" name="person_a_pass" type="password" required minlength="8" autocomplete="new-password">
+    </div>
+
+    <h2 style="margin-top:.5rem">Person B</h2>
+    <div class="field">
+      <label for="person_b_name">Name</label>
+      <input id="person_b_name" name="person_b_name" required maxlength="60" value="{{.PersonBName}}">
+    </div>
+    <div class="field">
+      <label for="person_b_pass">Password</label>
+      <input id="person_b_pass" name="person_b_pass" type="password" required minlength="8" autocomplete="new-password">
+    </div>
+
+    <button class="btn btn-primary btn-block" type="submit">Create household</button>
+  </form>
+</div>
+</body>
+</html>
+{{end}}

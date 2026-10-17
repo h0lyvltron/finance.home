@@ -1,0 +1,17 @@
+services:
+  finance:
+    build: .
+    ports:
+      - "3847:3847"
+    environment:
+      ADDR: ":3847"
+      DATA_DIR: /data
+      DB_PATH: /data/finance.db
+      # Set true only behind HTTPS
+      SECURE_COOKIE: "false"
+    volumes:
+      - finance_data:/data
+    restart: unless-stopped
+
+volumes:
+  finance_data:

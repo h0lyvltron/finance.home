@@ -1,0 +1,153 @@
+{{define "accounts"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Accounts — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin: .5rem 0 1rem">
+    <h1 style="margin:0">Accounts</h1>
+    <a class="btn btn-primary btn-sm" href="/accounts/new">Add</a>
+  </div>
+
+  {{if not .Accounts}}
+  <div class="panel empty">
+    <h2>No accounts yet</h2>
+    <p>Create a checking, savings, cash, credit, or loan account with a known balance on a date.</p>
+    <a class="btn btn-primary" href="/accounts/new">Add account</a>
+  </div>
+  {{else}}
+  <div class="panel">
+    {{range .Accounts}}
+    <a class="list-row" href="/accounts/{{.ID}}" style="color:inherit;text-decoration:none">
+      <div>
+        <div style="font-weight:600">{{.Name}}</div>
+        <div class="tiny muted">{{accountTypeLabel .Type}} · {{ownerLabel .Owner $.NameA $.NameB}}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-variant-numeric:tabular-nums;font-weight:650">
+          {{if .IsLiability}}{{moneyAbs .Balance $.Currency}}{{else}}{{money .Balance $.Currency}}{{end}}
+        </div>
+        {{if .IsLiability}}<div class="tiny faint">owed</div>{{end}}
+      </div>
+    </a>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
+
+{{define "account-form"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{if .Account}}Edit{{else}}New{{end}} account</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar">
+    <a href="/accounts">← Accounts</a>
+  </header>
+  <h1>{{if .Account}}Edit account{{else}}New account{{end}}</h1>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  {{if .Warn}}<div class="alert">{{.Warn}}</div>{{end}}
+
+  <form method="post" action="{{if .Account}}/accounts/{{.Account.ID}}{{else}}/accounts{{end}}" class="panel stack">
+    {{template "csrf" .}}
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" required value="{{if .Account}}{{.Account.Name}}{{else}}{{.Form.Name}}{{end}}" placeholder="Everyday checking">
+    </div>
+    <div class="field">
+      <label for="type">Type</label>
+      <select id="type" name="type" required>
+        {{$t := ""}}{{if .Account}}{{$t = .Account.Type}}{{else}}{{$t = .Form.Type}}{{end}}
+        <option value="checking" {{if eq $t "checking"}}selected{{end}}>Checking</option>
+        <option value="savings" {{if eq $t "savings"}}selected{{end}}>Savings</option>
+        <option value="cash" {{if eq $t "cash"}}selected{{end}}>Cash</option>
+        <option value="credit" {{if eq $t "credit"}}selected{{end}}>Credit card</option>
+        <option value="loan" {{if eq $t "loan"}}selected{{end}}>Loan / liability</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="owner">Owner</label>
+      <select id="owner" name="owner" required>
+        {{$o := "joint"}}{{if .Account}}{{$o = .Account.Owner}}{{else if .Form.Owner}}{{$o = .Form.Owner}}{{end}}
+        <option value="joint" {{if eq $o "joint"}}selected{{end}}>Joint</option>
+        <option value="a" {{if eq $o "a"}}selected{{end}}>{{.NameA}}</option>
+        <option value="b" {{if eq $o "b"}}selected{{end}}>{{.NameB}}</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="anchor_balance">Known balance</label>
+      <input id="anchor_balance" name="anchor_balance" inputmode="decimal" required
+             value="{{if .Account}}{{centsInput .Account.AnchorBalance}}{{else if .FormBalance}}{{.FormBalance}}{{else}}0.00{{end}}"
+             placeholder="0.00">
+      <p class="tiny muted">For credit cards and loans, enter the amount owed as a positive number — we store it as a liability.</p>
+    </div>
+    <div class="field">
+      <label for="anchor_date">As of date</label>
+      <input id="anchor_date" name="anchor_date" type="date" required
+             value="{{if .Account}}{{.Account.AnchorDate}}{{else if .Form.AnchorDate}}{{.Form.AnchorDate}}{{else}}{{today}}{{end}}">
+    </div>
+    <button class="btn btn-primary btn-block" type="submit">Save account</button>
+  </form>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "account-detail"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{.Account.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  <header class="topbar">
+    <a href="/accounts">← Accounts</a>
+    <div class="row">
+      <a class="btn btn-sm btn-ghost" href="/accounts/{{.Account.ID}}/edit">Edit</a>
+      <a class="btn btn-sm btn-ghost" href="/accounts/{{.Account.ID}}/reconcile">Reconcile</a>
+    </div>
+  </header>
+  {{template "flash" .}}
+
+  <p class="tiny faint">{{accountTypeLabel .Account.Type}} · {{ownerLabel .Account.Owner .NameA .NameB}}</p>
+  <h1>{{.Account.Name}}</h1>
+  <p style="font-size:1.6rem;font-family:var(--font-display);font-weight:650;margin:0 0 1rem">
+    {{if .Account.IsLiability}}{{moneyAbs .Account.Balance .Currency}} <span class="small muted">owed</span>
+    {{else}}{{money .Account.Balance .Currency}}{{end}}
+  </p>
+  <p class="tiny muted">Anchor {{money .Account.AnchorBalance .Currency}} on {{.Account.AnchorDate}}</p>
+
+  <h2 style="margin-top:1.25rem">Register</h2>
+  {{template "tx-list" .}}
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

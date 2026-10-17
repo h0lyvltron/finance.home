@@ -1,0 +1,22 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f5d50" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141312" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <title>{{block "title" .}}Household Finance{{end}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+  <script defer src="/static/vendor/chart.umd.min.js"></script>
+  <script defer src="/static/js/chart-adapter.js"></script>
+</head>
+<body>
+  {{template "body" .}}
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+</body>
+</html>
+{{end}}

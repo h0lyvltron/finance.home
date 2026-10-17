@@ -1,0 +1,74 @@
+{{define "csrf"}}
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+{{end}}
+
+{{define "nav"}}
+<nav class="bottom-nav" aria-label="Main">
+  <a href="/" class="{{if eq .Nav "home"}}active{{end}}">Home</a>
+  <a href="/transactions" class="{{if eq .Nav "transactions"}}active{{end}}">Activity</a>
+  <a href="/accounts" class="{{if eq .Nav "accounts"}}active{{end}}">Accounts</a>
+  <a href="/more" class="{{if eq .Nav "more"}}active{{end}}">More</a>
+</nav>
+{{end}}
+
+{{define "topbar"}}
+<header class="topbar">
+  <a class="brand" href="/">{{if .Household}}{{.Household.Name}}{{else}}Ledger<span>.</span>{{end}}</a>
+  <div class="row small muted">
+    {{if .Session}}{{.Session.PersonName}} · <a href="/logout">Sign out</a>{{end}}
+  </div>
+</header>
+{{end}}
+
+{{define "flash"}}
+{{if .Flash}}
+<div class="alert {{if eq .FlashType "error"}}alert-error{{else if eq .FlashType "ok"}}alert-ok{{end}}" role="status">{{.Flash}}</div>
+{{end}}
+{{end}}
+
+{{define "tx-list"}}
+{{if not .Transactions}}
+<div class="empty">
+  <h2>No transactions yet</h2>
+  <p>Tap + to capture a spend or income in a few taps.</p>
+</div>
+{{else}}
+<div class="panel" id="tx-list">
+  {{range .Transactions}}
+  <article class="tx-card">
+    <div>
+      <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else if .TransferID}}Transfer{{else}}(no payee){{end}}</div>
+      <div class="tx-meta">
+        {{.TransactionDate}} · {{.AccountName}}
+        {{if .IsSplit}} · Split{{else if .CategoryName}} · {{.CategoryName}}{{end}}
+        {{if eq .Status "pending"}} · <span class="chip chip-warn">Pending</span>{{end}}
+        {{if .TransferID}} · <span class="chip">Transfer</span>{{end}}
+      </div>
+    </div>
+    <div>
+      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+      {{if $.ShowRunning}}<div class="tx-bal">{{money .RunningBalance $.Currency}}</div>{{end}}
+      <form method="post" action="/transactions/{{.ID}}/delete" class="row" style="justify-content:flex-end;margin-top:.25rem"
+            data-on:submit="@post('/transactions/{{.ID}}/delete', {contentType: 'form'})">
+        {{template "csrf" $}}
+        <button class="btn btn-sm btn-ghost" type="submit">Delete</button>
+      </form>
+    </div>
+  </article>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "toast"}}
+<div class="toast" id="toast-{{.UndoID}}">
+  <span>{{.Message}}</span>
+  {{if .UndoID}}
+  <form method="post" action="/undo" data-on:submit="@post('/undo', {contentType: 'form'})">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="undo_id" value="{{.UndoID}}">
+    <button type="submit">Undo</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

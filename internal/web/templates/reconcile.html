@@ -1,0 +1,72 @@
+{{define "reconcile"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Reconcile {{.Account.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar">
+    <a href="/accounts/{{.Account.ID}}">← {{.Account.Name}}</a>
+  </header>
+  <h1>Reconcile</h1>
+  <p class="muted">Match your statement. Clear items, then compare to the ending balance.</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  {{if .Result}}
+  <div class="alert {{if eq .Result.Difference 0}}alert-ok{{else}}{{end}}">
+    {{if eq .Result.Difference 0}}
+      Balanced — difference is zero.
+    {{else}}
+      Difference: {{money .Result.Difference .Currency}} (statement − cleared book balance).
+    {{end}}
+  </div>
+  {{end}}
+
+  <form method="post" action="/accounts/{{.Account.ID}}/reconcile" class="stack">
+    {{template "csrf" .}}
+    <div class="panel stack">
+      <div class="field">
+        <label for="statement_date">Statement date</label>
+        <input id="statement_date" name="statement_date" type="date" required value="{{if .StatementDate}}{{.StatementDate}}{{else}}{{today}}{{end}}">
+      </div>
+      <div class="field">
+        <label for="ending_balance">Statement ending balance</label>
+        <input id="ending_balance" name="ending_balance" inputmode="decimal" required
+               value="{{.EndingBalance}}" placeholder="0.00">
+        {{if .Account.IsLiability}}
+        <p class="tiny muted">Enter the amount owed as a positive number.</p>
+        {{end}}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Uncleared items</h2>
+      {{if not .Items}}
+      <p class="muted small">Nothing pending or cleared to reconcile.</p>
+      {{else}}
+      <div class="table-list">
+        {{range .Items}}
+        <label class="list-row" style="cursor:pointer">
+          <div class="row">
+            <input type="checkbox" name="clear_id" value="{{.ID}}" {{if eq .Status "cleared"}}checked{{end}}>
+            <div>
+              <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+              <div class="tiny muted">{{.TransactionDate}} · {{.Status}}</div>
+            </div>
+          </div>
+          <div style="font-variant-numeric:tabular-nums">{{money .Amount $.Currency}}</div>
+        </label>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+
+    <button class="btn btn-primary btn-block" type="submit">Finish reconcile</button>
+  </form>
+</div>
+</body>
+</html>
+{{end}}

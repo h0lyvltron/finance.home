@@ -1,0 +1,11 @@
+/data/
+*.db
+*.db-*
+/bin/
+/dist/
+.DS_Store
+*.exe
+.idea/
+.vscode/
+/agent-tools/
+*.log

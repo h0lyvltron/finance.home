@@ -1,0 +1,210 @@
+package handlers
+
+import (
+	"database/sql"
+	"net/http"
+	"strings"
+
+	"finance.home/internal/auth"
+	"finance.home/internal/config"
+	"finance.home/internal/models"
+	"finance.home/internal/store"
+	"finance.home/internal/web"
+)
+
+type App struct {
+	DB     *sql.DB
+	Store  *store.Store
+	Render *web.Renderer
+	Cfg    config.Config
+}
+
+type pageData struct {
+	Nav          string
+	Household    *models.Household
+	Session      *auth.Session
+	CSRF         string
+	Currency     string
+	NameA        string
+	NameB        string
+	Accounts     []models.Account
+	Categories   []models.Category
+	Payees       []models.Payee
+	Tags         []models.Tag
+	Transactions []models.Transaction
+	Account      *models.Account
+	Flash        string
+	FlashType    string
+	Error        string
+	Warn         string
+	ShowRunning  bool
+	NetWorth     int64
+	People       []models.Person
+	// forms / misc
+	Form            any
+	FormBalance     string
+	HouseholdName   string
+	CurrencySel     string
+	Timezone        string
+	PersonAName     string
+	PersonBName     string
+	Name            string
+	Items           []models.Transaction
+	StatementDate   string
+	EndingBalance   string
+	Result          *reconcileResult
+	UndoID          string
+	Message         string
+}
+
+type reconcileResult struct {
+	Difference int64
+}
+
+func (a *App) base(r *http.Request, sess *auth.Session) pageData {
+	d := pageData{Session: sess, Currency: "USD"}
+	if sess != nil {
+		d.CSRF = sess.CSRFToken
+	}
+	h, err := a.Store.Household()
+	if err == nil {
+		d.Household = h
+		d.Currency = h.Currency
+	}
+	people, _ := a.Store.People()
+	for _, p := range people {
+		if p.Slot == "a" {
+			d.NameA = p.Name
+		}
+		if p.Slot == "b" {
+			d.NameB = p.Name
+		}
+	}
+	d.People = people
+	return d
+}
+
+func (a *App) withQuickAdd(d *pageData) {
+	accts, _ := a.Store.ListAccounts(false)
+	cats, _ := a.Store.ListCategories("", false)
+	payees, _ := a.Store.ListPayees(30)
+	d.Accounts = accts
+	d.Categories = cats
+	d.Payees = payees
+}
+
+func (a *App) Routes() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.Handle("GET /static/", http.StripPrefix("/static/", web.StaticHandler()))
+	mux.HandleFunc("GET /manifest.webmanifest", a.manifest)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("GET /setup", a.setupGet)
+	mux.HandleFunc("POST /setup", a.setupPost)
+	mux.HandleFunc("GET /login", a.loginGet)
+	mux.HandleFunc("POST /login", a.loginPost)
+	mux.HandleFunc("GET /logout", a.logout)
+
+	mux.HandleFunc("GET /{$}", a.requireAuth(a.home))
+	mux.HandleFunc("GET /accounts", a.requireAuth(a.accountsList))
+	mux.HandleFunc("GET /accounts/new", a.requireAuth(a.accountNew))
+	mux.HandleFunc("POST /accounts", a.requireAuth(a.csrf(a.accountCreate)))
+	mux.HandleFunc("GET /accounts/{id}", a.requireAuth(a.accountDetail))
+	mux.HandleFunc("GET /accounts/{id}/edit", a.requireAuth(a.accountEdit))
+	mux.HandleFunc("POST /accounts/{id}", a.requireAuth(a.csrf(a.accountUpdate)))
+	mux.HandleFunc("GET /accounts/{id}/reconcile", a.requireAuth(a.reconcileGet))
+	mux.HandleFunc("POST /accounts/{id}/reconcile", a.requireAuth(a.csrf(a.reconcilePost)))
+
+	mux.HandleFunc("GET /transactions", a.requireAuth(a.transactionsList))
+	mux.HandleFunc("GET /transactions/new", a.requireAuth(a.transactionNew))
+	mux.HandleFunc("POST /transactions", a.requireAuth(a.csrf(a.transactionCreate)))
+	mux.HandleFunc("POST /transactions/quick", a.requireAuth(a.csrf(a.quickAdd)))
+	mux.HandleFunc("POST /transactions/{id}/delete", a.requireAuth(a.csrf(a.transactionDelete)))
+
+	mux.HandleFunc("GET /transfers/new", a.requireAuth(a.transferNew))
+	mux.HandleFunc("POST /transfers", a.requireAuth(a.csrf(a.transferCreate)))
+
+	mux.HandleFunc("POST /undo", a.requireAuth(a.csrf(a.undo)))
+
+	mux.HandleFunc("GET /more", a.requireAuth(a.more))
+	mux.HandleFunc("GET /categories", a.requireAuth(a.categoriesPage))
+	mux.HandleFunc("POST /categories", a.requireAuth(a.csrf(a.categoryCreate)))
+	mux.HandleFunc("GET /tags", a.requireAuth(a.tagsPage))
+	mux.HandleFunc("POST /tags", a.requireAuth(a.csrf(a.tagCreate)))
+	mux.HandleFunc("GET /payees", a.requireAuth(a.payeesPage))
+	mux.HandleFunc("POST /payees", a.requireAuth(a.csrf(a.payeeCreate)))
+
+	return mux
+}
+
+type authedHandler func(http.ResponseWriter, *http.Request, *auth.Session)
+
+func (a *App) requireAuth(next authedHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		needs, err := needsSetup(a.DB)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if needs {
+			http.Redirect(w, r, "/setup", http.StatusSeeOther)
+			return
+		}
+		sess, err := auth.SessionFromRequest(r, a.DB)
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next(w, r, sess)
+	}
+}
+
+func (a *App) csrf(next authedHandler) authedHandler {
+	return func(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+		_ = r.ParseForm()
+		token := r.FormValue("csrf")
+		if token == "" {
+			token = r.Header.Get("X-CSRF-Token")
+		}
+		if token == "" || token != sess.CSRFToken {
+			http.Error(w, "invalid CSRF token", http.StatusForbidden)
+			return
+		}
+		next(w, r, sess)
+	}
+}
+
+func needsSetup(db *sql.DB) (bool, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(1) FROM households`).Scan(&n)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return true, nil
+		}
+		return false, err
+	}
+	return n == 0, nil
+}
+
+func (a *App) manifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json")
+	_, _ = w.Write([]byte(`{
+  "name": "Household Finance",
+  "short_name": "Ledger",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f1ec",
+  "theme_color": "#2f5d50",
+  "icons": []
+}`))
+}
+
+func wantsDatastar(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "text/event-stream") ||
+		r.Header.Get("Datastar-Request") == "true" ||
+		strings.Contains(strings.ToLower(r.Header.Get("Accept")), "datastar")
+}

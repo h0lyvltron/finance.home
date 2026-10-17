@@ -1,0 +1,37 @@
+{{define "login"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sign in — {{.HouseholdName}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-top:3rem;padding-bottom:2rem">
+  <p class="tiny faint">Household</p>
+  <h1>{{.HouseholdName}}</h1>
+  <p class="muted">Sign in to the shared ledger.</p>
+
+  {{if .Error}}
+  <div class="alert alert-error" style="margin:1rem 0">{{.Error}}</div>
+  {{end}}
+
+  <form method="post" action="/login" class="panel stack" style="margin-top:1.25rem">
+    <div class="field">
+      <label for="name">Your name</label>
+      <input id="name" name="name" required list="people" value="{{.Name}}" autocomplete="username">
+      <datalist id="people">
+        {{range .People}}<option value="{{.Name}}"></option>{{end}}
+      </datalist>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" required autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+  </form>
+</div>
+</body>
+</html>
+{{end}}

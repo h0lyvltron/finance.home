@@ -1,0 +1,81 @@
+{{define "home"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+  <script defer src="/static/vendor/chart.umd.min.js"></script>
+  <script defer src="/static/js/chart-adapter.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <section class="stack" style="margin-top:.5rem">
+    <div>
+      <p class="tiny faint">Net across accounts</p>
+      <h1 style="font-size:2rem">{{money .NetWorth .Currency}}</h1>
+      <p class="muted small">Balances from anchors + posted activity. Full Home widgets arrive in a later slice.</p>
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <h2 style="margin:0">Accounts</h2>
+        <a class="btn btn-sm btn-ghost" href="/accounts">All</a>
+      </div>
+      {{if not .Accounts}}
+      <div class="empty" style="padding:1.25rem 0">
+        <p>Add a checking or cash account to start capturing.</p>
+        <a class="btn btn-primary" href="/accounts/new">Add account</a>
+      </div>
+      {{else}}
+      <div class="table-list">
+        {{range .Accounts}}
+        <a class="list-row" href="/accounts/{{.ID}}" style="color:inherit;text-decoration:none">
+          <div>
+            <div style="font-weight:600">{{.Name}}</div>
+            <div class="tiny muted">{{accountTypeLabel .Type}} · {{ownerLabel .Owner $.NameA $.NameB}}</div>
+          </div>
+          <div style="font-variant-numeric:tabular-nums;font-weight:650">
+            {{if .IsLiability}}{{moneyAbs .Balance $.Currency}} owed{{else}}{{money .Balance $.Currency}}{{end}}
+          </div>
+        </a>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <h2 style="margin:0">Recent</h2>
+        <a class="btn btn-sm btn-ghost" href="/transactions">Activity</a>
+      </div>
+      {{if not .Transactions}}
+      <p class="muted small" style="margin:.75rem 0 0">Nothing recorded yet.</p>
+      {{else}}
+        {{range .Transactions}}
+        <article class="tx-card">
+          <div>
+            <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+            <div class="tx-meta">{{.TransactionDate}} · {{.AccountName}}</div>
+          </div>
+          <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+        </article>
+        {{end}}
+      {{end}}
+    </div>
+  </section>
+</div>
+
+<button class="fab" type="button" aria-label="Quick add"
+  data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

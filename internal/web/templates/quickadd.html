@@ -1,0 +1,93 @@
+{{define "quickadd-sheet"}}
+<div class="sheet-backdrop" data-class:open="$quickAddOpen"
+     data-on:click="$quickAddOpen = false" data-signals="{quickAddOpen: false, qaDate: '{{today}}', qaKind: 'expense'}"></div>
+<aside class="sheet" id="quick-add" data-class:open="$quickAddOpen" aria-label="Quick add">
+  <div class="sheet-handle"></div>
+  <div class="spread" style="margin-bottom:.75rem">
+    <h2 style="margin:0">Quick add</h2>
+    <button class="btn btn-sm btn-ghost" type="button" data-on:click="$quickAddOpen = false">Close</button>
+  </div>
+
+  <form class="stack" method="post" action="/transactions/quick"
+        data-on:submit="@post('/transactions/quick', {contentType: 'form'})">
+    {{template "csrf" .}}
+    <input type="hidden" name="kind" data-attr:value="$qaKind" value="expense">
+    <input type="hidden" name="date" data-attr:value="$qaDate" value="{{today}}">
+    <input type="hidden" name="and_another" id="qa-and-another" value="0">
+
+    <div class="row">
+      <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'expense'"
+              data-class:btn-primary="$qaKind === 'expense'">Spend</button>
+      <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'income'"
+              data-class:btn-primary="$qaKind === 'income'">Income</button>
+    </div>
+
+    <div class="field">
+      <label for="qa-amount">Amount</label>
+      <input class="amount-input" id="qa-amount" name="amount" inputmode="decimal" required
+             placeholder="0.00" autocomplete="off" autofocus>
+    </div>
+
+    <div class="date-pills">
+      <button type="button" data-on:click="$qaDate = '{{today}}'"
+              data-class:active="$qaDate === '{{today}}'">Today</button>
+      <button type="button" data-on:click="$qaDate = '{{yesterday}}'"
+              data-class:active="$qaDate === '{{yesterday}}'">Yesterday</button>
+    </div>
+
+    <div class="field">
+      <label for="qa-payee">Payee</label>
+      <input id="qa-payee" name="payee" list="qa-payees" placeholder="Who / where" autocomplete="off">
+      <datalist id="qa-payees">
+        {{range .Payees}}<option value="{{.Name}}"></option>{{end}}
+      </datalist>
+    </div>
+
+    <div class="field">
+      <label for="qa-account">Account</label>
+      <select id="qa-account" name="account_id" required>
+        <option value="">Select…</option>
+        {{range .Accounts}}
+        <option value="{{.ID}}">{{.Name}}</option>
+        {{end}}
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="qa-category">Category</label>
+      <select id="qa-category" name="category_id" required>
+        <option value="">Select…</option>
+        {{range .Categories}}
+        {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
+        <option value="{{.ID}}" data-kind="{{.Kind}}">
+          {{if .ParentName}}{{.ParentName}} › {{.Name}}{{else}}{{.Name}}{{end}}
+        </option>
+        {{end}}
+        {{end}}
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="qa-person">For</label>
+      <select id="qa-person" name="person">
+        <option value="shared" selected>Shared</option>
+        <option value="a">{{.NameA}}</option>
+        <option value="b">{{.NameB}}</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="qa-notes">Notes</label>
+      <input id="qa-notes" name="notes" placeholder="Optional">
+    </div>
+
+    <div class="row">
+      <button class="btn btn-primary grow" type="submit"
+              data-on:click="document.getElementById('qa-and-another').value='0'">Save</button>
+      <button class="btn btn-ghost grow" type="submit"
+              data-on:click="document.getElementById('qa-and-another').value='1'">Save &amp; another</button>
+    </div>
+    <div id="qa-error"></div>
+  </form>
+</aside>
+{{end}}
