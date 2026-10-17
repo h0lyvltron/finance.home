@@ -10,7 +10,7 @@ import (
 	"finance.home/internal/models"
 )
 
-// Widget catalog types (ordered list; S/M/L width — no free-form grid).
+// Widget catalog types (placed on a 12-column cell grid; see dashboard_grid.go).
 const (
 	WidgetLeftToSpend   = "left_to_spend"
 	WidgetNetWorth      = "net_worth"
@@ -30,23 +30,24 @@ type CatalogEntry struct {
 	Type         string
 	Label        string
 	DefaultWidth string
+	DefaultH     int  // default row span on the cell grid
 	NeedsFilter  bool // saved_filter requires picking a saved filter
 }
 
 // WidgetCatalog is the fixed set of personal dashboard widgets.
 func WidgetCatalog() []CatalogEntry {
 	return []CatalogEntry{
-		{Type: WidgetLeftToSpend, Label: "Left to spend", DefaultWidth: "l"},
-		{Type: WidgetNetWorth, Label: "Net worth", DefaultWidth: "m"},
-		{Type: WidgetCashFlow, Label: "Cash flow", DefaultWidth: "l"},
-		{Type: WidgetCategorySpend, Label: "Category spend", DefaultWidth: "l"},
-		{Type: WidgetBudgetHealth, Label: "Budget health", DefaultWidth: "m"},
-		{Type: WidgetGoals, Label: "Goals", DefaultWidth: "m"},
-		{Type: WidgetAccounts, Label: "Accounts", DefaultWidth: "m"},
-		{Type: WidgetRecent, Label: "Recent", DefaultWidth: "l"},
-		{Type: WidgetInsights, Label: "Insights", DefaultWidth: "m"},
-		{Type: WidgetBills, Label: "Bills", DefaultWidth: "m"},
-		{Type: WidgetSavedFilter, Label: "Saved filter", DefaultWidth: "s", NeedsFilter: true},
+		{Type: WidgetLeftToSpend, Label: "Left to spend", DefaultWidth: "l", DefaultH: 3},
+		{Type: WidgetNetWorth, Label: "Net worth", DefaultWidth: "m", DefaultH: 2},
+		{Type: WidgetCashFlow, Label: "Cash flow", DefaultWidth: "l", DefaultH: 4},
+		{Type: WidgetCategorySpend, Label: "Category spend", DefaultWidth: "l", DefaultH: 4},
+		{Type: WidgetBudgetHealth, Label: "Budget health", DefaultWidth: "m", DefaultH: 3},
+		{Type: WidgetGoals, Label: "Goals", DefaultWidth: "m", DefaultH: 4},
+		{Type: WidgetAccounts, Label: "Accounts", DefaultWidth: "m", DefaultH: 4},
+		{Type: WidgetRecent, Label: "Recent", DefaultWidth: "l", DefaultH: 8},
+		{Type: WidgetInsights, Label: "Insights", DefaultWidth: "m", DefaultH: 4},
+		{Type: WidgetBills, Label: "Bills", DefaultWidth: "m", DefaultH: 4},
+		{Type: WidgetSavedFilter, Label: "Saved filter", DefaultWidth: "s", DefaultH: 2, NeedsFilter: true},
 	}
 }
 
@@ -90,7 +91,7 @@ func normalizeRangePreset(p string) string {
 func (s *Store) EnsureHouseholdDefault() (*models.DashboardLayout, error) {
 	layout, err := s.getLayoutByPerson(nil)
 	if err == nil {
-		return layout, nil
+		return layout, s.ensureGrid(layout.ID)
 	}
 	if err != sql.ErrNoRows {
 		return nil, err
@@ -107,19 +108,19 @@ func (s *Store) EnsureHouseholdDefault() (*models.DashboardLayout, error) {
 	}
 	id, _ := res.LastInsertId()
 	defaults := []struct {
-		Type  string
-		Width string
+		Type           string
+		Col, Row, W, H int
 	}{
-		{WidgetLeftToSpend, "l"},
-		{WidgetInsights, "m"},
-		{WidgetBudgetHealth, "m"},
-		{WidgetBills, "m"},
-		{WidgetNetWorth, "s"},
-		{WidgetRecent, "l"},
+		{WidgetLeftToSpend, 1, 1, 8, 3},
+		{WidgetNetWorth, 9, 1, 4, 3},
+		{WidgetInsights, 1, 4, 6, 4},
+		{WidgetBudgetHealth, 7, 4, 6, 4},
+		{WidgetBills, 1, 8, 6, 5},
+		{WidgetRecent, 7, 8, 6, 8},
 	}
 	for i, d := range defaults {
-		if _, err := s.DB.Exec(`INSERT INTO dashboard_widgets(layout_id, widget_type, width, sort_order, config_json, created_at)
-			VALUES (?,?,?,?, '{}', ?)`, id, d.Type, d.Width, i, now); err != nil {
+		if _, err := s.DB.Exec(`INSERT INTO dashboard_widgets(layout_id, widget_type, width, sort_order, grid_col, grid_row, grid_w, grid_h, config_json, created_at)
+			VALUES (?,?,?,?,?,?,?,?, '{}', ?)`, id, d.Type, widthForSpan(d.W), i, d.Col, d.Row, d.W, d.H, now); err != nil {
 			return nil, err
 		}
 	}
@@ -137,7 +138,7 @@ func (s *Store) EnsurePersonDashboard(personID int64) (*models.DashboardLayout, 
 	}
 	layout, err := s.getLayoutByPerson(&personID)
 	if err == nil {
-		return layout, nil
+		return layout, s.ensureGrid(layout.ID)
 	}
 	if err != sql.ErrNoRows {
 		return nil, err
@@ -156,15 +157,8 @@ func (s *Store) EnsurePersonDashboard(personID int64) (*models.DashboardLayout, 
 	if err != nil {
 		return nil, err
 	}
-	for _, w := range widgets {
-		cfg := w.ConfigJSON
-		if cfg == "" {
-			cfg = "{}"
-		}
-		if _, err := s.DB.Exec(`INSERT INTO dashboard_widgets(layout_id, widget_type, width, sort_order, config_json, created_at)
-			VALUES (?,?,?,?,?,?)`, newID, w.WidgetType, w.Width, w.SortOrder, cfg, now); err != nil {
-			return nil, err
-		}
+	if err := copyWidgets(s.DB, widgets, newID, now); err != nil {
+		return nil, err
 	}
 	return s.GetLayout(newID)
 }
@@ -208,8 +202,8 @@ func (s *Store) getLayoutByPerson(personID *int64) (*models.DashboardLayout, err
 }
 
 func (s *Store) ListWidgets(layoutID int64) ([]models.DashboardWidget, error) {
-	rows, err := s.DB.Query(`SELECT id, layout_id, widget_type, width, sort_order, config_json, created_at
-		FROM dashboard_widgets WHERE layout_id=? ORDER BY sort_order ASC, id ASC`, layoutID)
+	rows, err := s.DB.Query(`SELECT `+widgetCols+`
+		FROM dashboard_widgets WHERE layout_id=? ORDER BY grid_row ASC, grid_col ASC, sort_order ASC, id ASC`, layoutID)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +211,7 @@ func (s *Store) ListWidgets(layoutID int64) ([]models.DashboardWidget, error) {
 	var out []models.DashboardWidget
 	for rows.Next() {
 		var w models.DashboardWidget
-		if err := rows.Scan(&w.ID, &w.LayoutID, &w.WidgetType, &w.Width, &w.SortOrder, &w.ConfigJSON, &w.CreatedAt); err != nil {
+		if err := scanWidget(rows, &w); err != nil {
 			return nil, err
 		}
 		w.Label = widgetLabel(w.WidgetType)
@@ -226,12 +220,16 @@ func (s *Store) ListWidgets(layoutID int64) ([]models.DashboardWidget, error) {
 	return out, rows.Err()
 }
 
+const widgetCols = `id, layout_id, widget_type, width, sort_order, grid_col, grid_row, grid_w, grid_h, config_json, created_at`
+
+func scanWidget(row interface{ Scan(...any) error }, w *models.DashboardWidget) error {
+	return row.Scan(&w.ID, &w.LayoutID, &w.WidgetType, &w.Width, &w.SortOrder,
+		&w.GridCol, &w.GridRow, &w.GridW, &w.GridH, &w.ConfigJSON, &w.CreatedAt)
+}
+
 func (s *Store) GetWidget(id int64) (*models.DashboardWidget, error) {
 	w := &models.DashboardWidget{}
-	err := s.DB.QueryRow(`SELECT id, layout_id, widget_type, width, sort_order, config_json, created_at
-		FROM dashboard_widgets WHERE id=?`, id).
-		Scan(&w.ID, &w.LayoutID, &w.WidgetType, &w.Width, &w.SortOrder, &w.ConfigJSON, &w.CreatedAt)
-	if err != nil {
+	if err := scanWidget(s.DB.QueryRow(`SELECT `+widgetCols+` FROM dashboard_widgets WHERE id=?`, id), w); err != nil {
 		return nil, err
 	}
 	w.Label = widgetLabel(w.WidgetType)
@@ -301,11 +299,13 @@ func (s *Store) AddWidget(personID int64, in AddWidgetInput) (int64, error) {
 		cfg["saved_filter_id"] = in.SavedFilterID
 	}
 	cfgJSON, _ := json.Marshal(cfg)
-	var maxOrd int
-	_ = s.DB.QueryRow(`SELECT COALESCE(MAX(sort_order), -1) FROM dashboard_widgets WHERE layout_id=?`, layout.ID).Scan(&maxOrd)
+	var maxOrd, bottom int
+	_ = s.DB.QueryRow(`SELECT COALESCE(MAX(sort_order), -1), COALESCE(MAX(grid_row + grid_h), 1)
+		FROM dashboard_widgets WHERE layout_id=?`, layout.ID).Scan(&maxOrd, &bottom)
+	r := clampRect(gridRect{Col: 1, Row: bottom, W: spanForWidth(in.WidgetType, width), H: defaultHeight(in.WidgetType)})
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.DB.Exec(`INSERT INTO dashboard_widgets(layout_id, widget_type, width, sort_order, config_json, created_at)
-		VALUES (?,?,?,?,?,?)`, layout.ID, in.WidgetType, width, maxOrd+1, string(cfgJSON), now)
+	res, err := s.DB.Exec(`INSERT INTO dashboard_widgets(layout_id, widget_type, width, sort_order, grid_col, grid_row, grid_w, grid_h, config_json, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`, layout.ID, in.WidgetType, width, maxOrd+1, r.Col, r.Row, r.W, r.H, string(cfgJSON), now)
 	if err != nil {
 		return 0, err
 	}
@@ -326,120 +326,6 @@ func (s *Store) RemoveWidget(personID, widgetID int64) error {
 		return err
 	}
 	s.touchLayout(w.LayoutID)
-	return nil
-}
-
-func (s *Store) SetWidgetWidth(personID, widgetID int64, width string) error {
-	w, err := s.GetWidget(widgetID)
-	if err != nil {
-		return err
-	}
-	if err := s.layoutOwnedBy(w.LayoutID, personID); err != nil {
-		return err
-	}
-	width = normalizeWidth(width)
-	_, err = s.DB.Exec(`UPDATE dashboard_widgets SET width=? WHERE id=?`, width, widgetID)
-	if err != nil {
-		return err
-	}
-	s.touchLayout(w.LayoutID)
-	return nil
-}
-
-func (s *Store) MoveWidget(personID, widgetID int64, dir string) error {
-	w, err := s.GetWidget(widgetID)
-	if err != nil {
-		return err
-	}
-	if err := s.layoutOwnedBy(w.LayoutID, personID); err != nil {
-		return err
-	}
-	widgets, err := s.ListWidgets(w.LayoutID)
-	if err != nil {
-		return err
-	}
-	idx := -1
-	for i, x := range widgets {
-		if x.ID == widgetID {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return sql.ErrNoRows
-	}
-	swap := idx
-	if dir == "up" && idx > 0 {
-		swap = idx - 1
-	} else if dir == "down" && idx < len(widgets)-1 {
-		swap = idx + 1
-	} else {
-		return nil
-	}
-	a, b := widgets[idx], widgets[swap]
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE dashboard_widgets SET sort_order=? WHERE id=?`, b.SortOrder, a.ID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE dashboard_widgets SET sort_order=? WHERE id=?`, a.SortOrder, b.ID); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.touchLayout(w.LayoutID)
-	return nil
-}
-
-// ReorderWidgets sets sort_order to the given id sequence.
-// The sequence must be exactly the widgets on the person's layout.
-func (s *Store) ReorderWidgets(personID int64, ids []int64) error {
-	if personID <= 0 {
-		return fmt.Errorf("person required")
-	}
-	if len(ids) == 0 {
-		return fmt.Errorf("order required")
-	}
-	layout, err := s.getLayoutByPerson(&personID)
-	if err != nil {
-		return err
-	}
-	widgets, err := s.ListWidgets(layout.ID)
-	if err != nil {
-		return err
-	}
-	if len(ids) != len(widgets) {
-		return fmt.Errorf("order must list every widget")
-	}
-	known := make(map[int64]bool, len(widgets))
-	for _, w := range widgets {
-		known[w.ID] = true
-	}
-	seen := make(map[int64]bool, len(ids))
-	for _, id := range ids {
-		if id <= 0 || !known[id] || seen[id] {
-			return fmt.Errorf("unknown widget")
-		}
-		seen[id] = true
-	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for i, id := range ids {
-		if _, err := tx.Exec(`UPDATE dashboard_widgets SET sort_order=? WHERE id=? AND layout_id=?`, i, id, layout.ID); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.touchLayout(layout.ID)
 	return nil
 }
 

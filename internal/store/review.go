@@ -53,7 +53,21 @@ func (s *Store) ListNeedsReview(limit int) ([]models.Transaction, error) {
 		t.IsSplit = split == 1
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ids := make([]int64, len(out))
+	for i := range out {
+		ids[i] = out[i].ID
+	}
+	tags, err := s.TagsForTransactions(ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Tags = tags[out[i].ID]
+	}
+	return out, nil
 }
 
 func (s *Store) ConfirmReview(id int64, categoryID *int64, person, payee, notes string) error {

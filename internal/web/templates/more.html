@@ -34,28 +34,8 @@
       <div><div style="font-weight:600">Plan</div><div class="tiny muted">Budgets, left to spend, bills</div></div>
       <span class="faint">›</span>
     </a>
-    <a class="list-row" href="/explore" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Spending Explore</div><div class="tiny muted">Group by category, payee, tag, person, account</div></div>
-      <span class="faint">›</span>
-    </a>
-    <a class="list-row" href="/reports/cashflow" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Cash flow</div><div class="tiny muted">Income, expense, net by grain</div></div>
-      <span class="faint">›</span>
-    </a>
-    <a class="list-row" href="/reports/pivot" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Segment × time</div><div class="tiny muted">Pivot table + stacked bar</div></div>
-      <span class="faint">›</span>
-    </a>
-    <a class="list-row" href="/reports/networth" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Net worth</div><div class="tiny muted">Balances over time</div></div>
-      <span class="faint">›</span>
-    </a>
-    <a class="list-row" href="/reports/budget" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Budget vs actual</div><div class="tiny muted">Category targets and spend</div></div>
-      <span class="faint">›</span>
-    </a>
-    <a class="list-row" href="/reports/savings" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Savings rate</div><div class="tiny muted">Income kept vs household target</div></div>
+    <a class="list-row" href="/trends" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Trends</div><div class="tiny muted">Charts moved to the Trends tab: spending, cash flow, net worth, budget, savings</div></div>
       <span class="faint">›</span>
     </a>
     <a class="list-row" href="/goals" style="color:inherit;text-decoration:none">
@@ -75,7 +55,7 @@
       <span class="faint">›</span>
     </a>
     <a class="list-row" href="/rules" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Payee rules</div><div class="tiny muted">Ordered; first match wins</div></div>
+      <div><div style="font-weight:600">Payee rules</div><div class="tiny muted">How imported payees get categorized; fix or re-file past ones</div></div>
       <span class="faint">›</span>
     </a>
     <a class="list-row" href="/categories" style="color:inherit;text-decoration:none">
@@ -83,7 +63,7 @@
       <span class="faint">›</span>
     </a>
     <a class="list-row" href="/tags" style="color:inherit;text-decoration:none">
-      <div><div style="font-weight:600">Tags</div><div class="tiny muted">Flexible labels</div></div>
+      <div><div style="font-weight:600">Tags</div><div class="tiny muted">Trips, occasions, reimbursables — with totals</div></div>
       <span class="faint">›</span>
     </a>
     <a class="list-row" href="/payees" style="color:inherit;text-decoration:none">
@@ -100,6 +80,55 @@
 </html>
 {{end}}
 
+{{define "color-swatches"}}
+<div class="field rule-form-wide"><label>Color</label>
+  <div class="swatches" role="radiogroup" aria-label="Color">
+    <label class="swatch swatch-none" title="{{.EmptyLabel}}"><input type="radio" name="color" value=""{{if .EmptyChecked}} checked{{end}}><span>{{.EmptyLabel}}</span></label>
+    {{range .Swatches}}<label class="swatch" title="{{.}}"><input type="radio" name="color" value="{{.}}"><span style="background: {{.}}"></span></label>{{end}}
+    <label class="swatch swatch-custom" title="Custom color"><input type="radio" name="color" value="custom"><input type="color" name="color_custom" value="#888888" aria-label="Custom color" data-color-custom></label>
+  </div>
+  {{if .Children}}<label class="check tiny" data-color-children hidden><input type="checkbox" name="color_children" value="1"> Apply to its subcategories too</label>{{end}}
+</div>
+{{end}}
+
+{{define "category-row"}}
+{{$c := .C}}
+<div class="rule-row cat-row{{if .Child}} is-child{{end}}" id="cat-{{$c.ID}}" data-cat-row="{{$c.ID}}" data-category="{{$c.FormJSON}}"
+  data-search="{{lower $c.Name}}">
+  <div class="rule-main">
+    <div class="rule-when">
+      {{if $c.Protected}}{{if $c.Color}}<span class="cat-dot" style="background: {{$c.Color}}"></span>{{end}}
+      {{else}}<button type="button" class="cat-dot{{if not $c.Color}} is-empty{{end}}"{{if $c.Color}} style="background: {{$c.Color}}"{{end}}
+        data-cat-edit="{{$c.ID}}" title="Change color" aria-label="Change color of {{$c.Name}}"></button>{{end}}
+      <span class="cat-row-name">{{$c.Name}}</span>
+      {{if $c.Protected}}<span class="chip">built in</span>{{end}}
+      {{if eq $c.FixedFlexible "fixed"}}<span class="chip">fixed</span>{{end}}
+      {{if $c.ExcludeBudget}}<span class="chip">not budgeted</span>{{end}}
+    </div>
+    <div class="tiny muted">
+      {{if .N}}<a href="/transactions?category={{$c.ID}}&amp;preset=all">{{.N}} transaction{{if ne .N 1}}s{{end}}</a> · {{moneyAbs .T .Currency}}{{else}}Not used yet{{end}}{{if .R}} · <a href="/rules?q={{lower $c.Name}}">{{.R}} rule{{if ne .R 1}}s{{end}}</a>{{end}}{{if $c.Children}} · {{len $c.Children}} subcategor{{if eq (len $c.Children) 1}}y{{else}}ies{{end}}{{end}}
+    </div>
+  </div>
+  {{if not $c.Protected}}
+  <div class="rule-actions">
+    <form method="post" action="/categories/{{$c.ID}}/move"><input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="dir" value="up">
+      <button class="btn btn-sm btn-ghost" type="submit" title="Move up" aria-label="Move up">↑</button>
+    </form>
+    <form method="post" action="/categories/{{$c.ID}}/move"><input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="dir" value="down">
+      <button class="btn btn-sm btn-ghost" type="submit" title="Move down" aria-label="Move down">↓</button>
+    </form>
+    <button type="button" class="btn btn-sm btn-ghost" data-cat-edit="{{$c.ID}}">Edit</button>
+    <button type="button" class="btn btn-sm btn-ghost" data-cat="merge" data-ids="{{$c.ID}}" data-current="{{$c.ID}}"
+      data-amount="{{if eq $c.Kind "income"}}1{{else}}-1{{end}}" data-count="{{.N}}" data-title="Merge “{{$c.Name}}” into…"
+      title="Move everything in this category into another one">Merge…</button>
+    <button type="button" class="btn btn-sm btn-ghost" data-cat-archive="{{$c.ID}}" title="Hide from pickers; past transactions keep it">Archive</button>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
 {{define "categories"}}
 <!DOCTYPE html>
 <html lang="en">
@@ -108,53 +137,116 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Categories</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/categorize.js" defer></script>
 </head>
 <body>
-<div class="app-shell" style="padding-bottom:2rem">
-  <header class="topbar"><a href="/more">← More</a></header>
-  <div class="spread"><h1 style="margin:0">Categories</h1></div>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "csrf" .}}
+  <h1 style="margin:0">Categories</h1>
+  <p class="muted">Rename, regroup or merge categories. Merging moves every transaction, payee rule and budget to the other category,
+    and Undo puts it all back.</p>
   {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-  {{if .Flash}}<div class="alert alert-ok">{{.Flash}}</div>{{end}}
 
-  <form method="post" action="/categories" class="panel stack" style="margin:1rem 0">
-    {{template "csrf" .}}
-    <h2 style="margin:0">Add category</h2>
-    <div class="field"><label>Name</label><input name="name" required maxlength="80"></div>
-    <div class="field"><label>Kind</label>
-      <select name="kind"><option value="expense">Expense</option><option value="income">Income</option></select>
-    </div>
-    <div class="field"><label>Fixed / flexible</label>
-      <select name="fixed_flexible">
-        <option value="flexible">Flexible</option>
-        <option value="fixed">Fixed</option>
-        <option value="">—</option>
-      </select>
-    </div>
-    <div class="field"><label>Parent (optional)</label>
-      <select name="parent_id">
-        <option value="">Top level</option>
-        {{range .Categories}}
-        {{if not .ParentID}}
-        <option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>
-        {{end}}
-        {{end}}
-      </select>
-    </div>
-    <button class="btn btn-primary" type="submit">Add</button>
-  </form>
+  <div class="rules-toolbar">
+    <input type="search" class="cat-search" data-cat-search placeholder="Search categories…" value="{{.RuleQuery}}" aria-label="Search categories">
+  </div>
 
-  <div class="panel">
-    {{range .Categories}}
-    {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
-    <div class="list-row">
-      <div>
-        <div style="font-weight:600">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</div>
-        <div class="tiny muted">{{.Kind}}{{if .FixedFlexible}} · {{.FixedFlexible}}{{end}}{{if .Protected}} · protected{{end}}</div>
+  <details class="panel rule-add">
+    <summary><b>+ Add a top-level category</b></summary>
+    <form method="post" action="/categories" class="rule-form" style="margin-top:.8rem">
+      {{template "csrf" .}}
+      <div class="field"><label>Name</label><input name="name" required maxlength="80" placeholder="Hobbies"></div>
+      <div class="field"><label>Kind</label>
+        <select name="kind"><option value="expense">Spending</option><option value="income">Income</option></select>
+      </div>
+      <div class="field"><label>Bills or day-to-day?</label>
+        <select name="fixed_flexible">
+          <option value="flexible">Day-to-day (flexible)</option>
+          <option value="fixed">Regular bill (fixed)</option>
+        </select>
+      </div>
+      {{template "color-swatches" (dict "Swatches" .Swatches "EmptyLabel" "Auto" "EmptyChecked" true)}}
+      <div class="rule-form-wide"><button class="btn btn-primary" type="submit">Add category</button></div>
+    </form>
+  </details>
+
+  <p class="muted" data-cat-none hidden>No categories match your search.</p>
+  {{range .CategoryGroups}}
+  {{if .Items}}
+  <section class="cat-kind" data-cat-kind>
+    <h2 class="cat-kind-title">{{.Label}}</h2>
+    {{if eq .Kind "transfer"}}<p class="tiny muted" style="margin:-.3rem 0 .5rem">Money moving between your own accounts, like card payments or savings transfers. Left out of spending and income.</p>{{end}}
+    <div class="panel rules-list">
+      {{range .Items}}
+      <div class="cat-block" data-cat-block>
+        {{template "category-row" (dict "C" . "N" .TreeCount "T" .TreeTotal "R" .TreeRules "CSRF" $.CSRF "Currency" $.Currency)}}
+        {{range .Children}}
+        {{template "category-row" (dict "C" . "N" .Count "T" .Total "R" .Rules "Child" true "CSRF" $.CSRF "Currency" $.Currency)}}
+        {{end}}
+        <form method="post" action="/categories" class="cat-add-sub" data-cat-add>
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="parent_id" value="{{.ID}}">
+          <input name="name" required maxlength="80" placeholder="+ Add to {{.Name}}" aria-label="New subcategory of {{.Name}}">
+          <button class="btn btn-sm" type="submit">Add</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+  {{end}}
+
+  {{if .ArchivedCategories}}
+  <details class="panel cat-archived">
+    <summary><b>Archived ({{len .ArchivedCategories}})</b> <span class="tiny muted">hidden from pickers; past transactions keep them</span></summary>
+    {{range .ArchivedCategories}}
+    <div class="rule-row" id="cat-{{.ID}}">
+      <div class="rule-main">
+        <div class="rule-when"><span class="cat-row-name">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</span></div>
+        <div class="tiny muted">{{if .Count}}<a href="/transactions?category={{.ID}}&amp;preset=all">{{.Count}} transaction{{if ne .Count 1}}s{{end}}</a>{{else}}Not used{{end}}{{if .Rules}} · {{.Rules}} rule{{if ne .Rules 1}}s{{end}} still file into it{{end}}</div>
+      </div>
+      <div class="rule-actions">
+        <form method="post" action="/categories/{{.ID}}/restore">{{template "csrf" $}}
+          <button class="btn btn-sm btn-ghost" type="submit">Restore</button>
+        </form>
       </div>
     </div>
     {{end}}
-    {{end}}
-  </div>
+  </details>
+  {{end}}
+
+  <template id="cat-form-tpl">
+    <form method="post" class="rule-edit stack">
+      {{template "csrf" .}}
+      <div class="rule-form">
+        <div class="field"><label>Name</label><input name="name" required maxlength="80"></div>
+        <div class="field"><label>Inside</label>
+          <select name="parent_id">
+            <option value="">Top level</option>
+            {{range .Categories}}{{if and (not .ParentID) (ne .Kind "starting_balance")}}
+            <option value="{{.ID}}" data-kind="{{.Kind}}">{{.Name}}</option>
+            {{end}}{{end}}
+          </select>
+          <span class="tiny muted" data-parent-hint hidden>Has subcategories, so it stays at the top level.</span>
+        </div>
+        <div class="field"><label>Bills or day-to-day?</label>
+          <select name="fixed_flexible">
+            <option value="">Not set</option>
+            <option value="flexible">Day-to-day (flexible)</option>
+            <option value="fixed">Regular bill (fixed)</option>
+          </select>
+        </div>
+        <label class="check rule-form-wide"><input type="checkbox" name="exclude_budget" value="1"> Leave out of budgets</label>
+        {{template "color-swatches" (dict "Swatches" .Swatches "EmptyLabel" "None" "Children" true)}}
+      </div>
+      <div class="row">
+        <button class="btn btn-primary btn-sm" type="submit">Save</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-form-cancel>Cancel</button>
+      </div>
+    </form>
+  </template>
 </div>
 </body>
 </html>
@@ -168,23 +260,86 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Tags</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/tags.js" defer></script>
 </head>
 <body>
-<div class="app-shell" style="padding-bottom:2rem">
-  <header class="topbar"><a href="/more">← More</a></header>
-  <h1>Tags</h1>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "csrf" .}}
+  <h1 style="margin:0">Tags</h1>
+  <p class="muted">Tags mark special occasions that cut across categories, like a trip, a wedding or things to get reimbursed.
+    Tag a transaction with <b>+ tag</b> in Activity, or use <b>Select to tag</b> there to tag many at once.</p>
   {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-  <form method="post" action="/tags" class="panel stack">
-    {{template "csrf" .}}
-    <div class="field"><label>New tag</label><input name="name" required maxlength="40"></div>
-    <button class="btn btn-primary" type="submit">Add tag</button>
-  </form>
-  <div class="panel" style="margin-top:1rem">
-    {{if not .Tags}}<p class="muted">No tags yet.</p>{{end}}
-    <div class="row">
-      {{range .Tags}}<span class="chip">{{.Name}}</span>{{end}}
-    </div>
+
+  <div class="rules-toolbar">
+    <input type="search" class="cat-search" data-tag-search placeholder="Search tags…" value="{{.RuleQuery}}" aria-label="Search tags">
   </div>
+  <form method="post" action="/tags" class="panel tag-add-form">
+    {{template "csrf" .}}
+    <input name="name" required maxlength="40" placeholder="New tag, e.g. Hawaii trip 2026" aria-label="New tag">
+    <button class="btn btn-primary btn-sm" type="submit">Add tag</button>
+  </form>
+
+  <div class="panel rules-list">
+    {{if not .TagViews}}<p class="muted" style="margin:0">No tags yet. Add one above, or type a new name in the tag picker on any transaction.</p>{{end}}
+    <p class="muted" data-tag-none hidden style="margin:0">No tags match your search.</p>
+    {{range .TagViews}}
+    <div class="rule-row" id="tag-{{.ID}}" data-tag-manage="{{.ID}}" data-search="{{lower .Name}}">
+      <div class="rule-main">
+        <div class="rule-when"><span class="tag-chip tag-chip-lg">#{{.Name}}</span></div>
+        <div class="tiny muted">
+          {{if .Count}}<a href="/transactions?tag={{.ID}}&amp;preset=all">{{.Count}} transaction{{if ne .Count 1}}s{{end}}</a>{{if .Out}} · {{moneyAbs .Out $.Currency}} spent{{end}}{{if .In}} · {{moneyAbs .In $.Currency}} in{{end}} · {{.FirstDate}}{{if ne .FirstDate .LastDate}} – {{.LastDate}}{{end}} · <a href="/explore?tag={{.ID}}&amp;preset=all&amp;group=category">by category</a>{{else}}Not used yet{{end}}
+        </div>
+      </div>
+      <div class="rule-actions">
+        <button type="button" class="btn btn-sm btn-ghost" data-tag-rename="{{.ID}}">Rename</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-tag-merge="{{.ID}}" data-count="{{.Count}}" data-name="{{.Name}}"
+          title="Move everything tagged with this onto another tag">Merge…</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-tag-archive="{{.ID}}" title="Hide from the tag picker; transactions keep it">Archive</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-tag-delete="{{.ID}}" title="Remove it from every transaction">Delete</button>
+      </div>
+      <form method="post" action="/tags/{{.ID}}" class="rule-edit tag-edit" data-tag-rename-form hidden>
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input name="name" required maxlength="40" value="{{.Name}}" aria-label="Tag name">
+        <button class="btn btn-primary btn-sm" type="submit">Save</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-form-cancel>Cancel</button>
+      </form>
+    </div>
+    {{end}}
+  </div>
+
+  {{if .ArchivedTagViews}}
+  <details class="panel cat-archived">
+    <summary><b>Archived ({{len .ArchivedTagViews}})</b> <span class="tiny muted">hidden from the tag picker; transactions keep them</span></summary>
+    {{range .ArchivedTagViews}}
+    <div class="rule-row" id="tag-{{.ID}}">
+      <div class="rule-main">
+        <div class="rule-when"><span class="tag-chip tag-chip-lg">#{{.Name}}</span></div>
+        <div class="tiny muted">{{if .Count}}<a href="/transactions?tag={{.ID}}&amp;preset=all">{{.Count}} transaction{{if ne .Count 1}}s{{end}}</a>{{if .Out}} · {{moneyAbs .Out $.Currency}} spent{{end}}{{else}}Not used{{end}}</div>
+      </div>
+      <div class="rule-actions">
+        <form method="post" action="/tags/{{.ID}}/restore">{{template "csrf" $}}
+          <button class="btn btn-sm btn-ghost" type="submit">Restore</button>
+        </form>
+        <button type="button" class="btn btn-sm btn-ghost" data-tag-delete="{{.ID}}">Delete</button>
+      </div>
+    </div>
+    {{end}}
+  </details>
+  {{end}}
+
+  <template id="tag-merge-tpl">
+    <form class="rule-edit tag-edit" data-tag-merge-form>
+      <span class="small">Merge into</span>
+      <select name="tag_id" aria-label="Merge into">
+        {{range .TagViews}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}
+      </select>
+      <button class="btn btn-primary btn-sm" type="submit">Merge</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-form-cancel>Cancel</button>
+      <p class="tiny muted" style="margin:0;flex-basis:100%" data-merge-note></p>
+    </form>
+  </template>
 </div>
 </body>
 </html>

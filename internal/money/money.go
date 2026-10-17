@@ -38,17 +38,20 @@ func FormatAbs(cents int64, currency string) string {
 	return Format(cents, currency)
 }
 
-// ParseDecimal parses "12.34", "-12.34", "$12.34", "12" into cents.
+// ParseDecimal parses "12.34", "-12.34", "$12.34", "-$12.34", "(12.34)", "12" into cents.
 func ParseDecimal(s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, ",", "")
-	s = strings.TrimPrefix(s, "$")
+	s = strings.ReplaceAll(s, "$", "")
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, fmt.Errorf("empty amount")
 	}
 	neg := false
-	if strings.HasPrefix(s, "-") {
+	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+		neg = true
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	} else if strings.HasPrefix(s, "-") {
 		neg = true
 		s = s[1:]
 	} else if strings.HasPrefix(s, "+") {

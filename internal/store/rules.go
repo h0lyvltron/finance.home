@@ -2,9 +2,15 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"finance.home/internal/models"
+	"finance.home/internal/payee"
+	"github.com/google/uuid"
 )
 
 func (s *Store) ListPayeeRules() ([]models.PayeeRule, error) {
@@ -93,6 +99,243 @@ func (s *Store) DeletePayeeRule(id int64) error {
 	return err
 }
 
+func (s *Store) GetPayeeRule(id int64) (*models.PayeeRule, error) {
+	rules, err := s.ListPayeeRules()
+	if err != nil {
+		return nil, err
+	}
+	for i := range rules {
+		if rules[i].ID == id {
+			return &rules[i], nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (s *Store) UpdatePayeeRule(id int64, in PayeeRuleInput) error {
+	if in.PayeeMatch == "" {
+		in.PayeeMatch = "contains"
+	}
+	_, err := s.DB.Exec(`UPDATE payee_rules SET name=?, payee_match=?, payee_value=?, amount_min=?, amount_max=?,
+		account_id=?, notes_contains=?, set_category_id=?, set_person=?, rename_payee=?, set_tags=?
+		WHERE id=?`,
+		in.Name, in.PayeeMatch, in.PayeeValue, in.AmountMin, in.AmountMax, in.AccountID,
+		nullStr(in.NotesContains), in.SetCategoryID, nullStr(in.SetPerson), nullStr(in.RenamePayee),
+		nullStr(in.SetTags), id)
+	return err
+}
+
+func (s *Store) SetPayeeRuleEnabled(id int64, on bool) error {
+	v := 0
+	if on {
+		v = 1
+	}
+	_, err := s.DB.Exec(`UPDATE payee_rules SET enabled=? WHERE id=?`, v, id)
+	return err
+}
+
+func autoRuleName(value, category string) string {
+	return payee.Normalize(value) + " → " + category
+}
+
+// SetPayeeRuleCategory changes what the rule files payees as. Rules still
+// carrying their generated "MATCH → Category" name are renamed to match.
+func (s *Store) SetPayeeRuleCategory(id, categoryID int64) (models.CategoryRef, error) {
+	ref, err := s.CategoryRef(categoryID)
+	if err != nil {
+		return ref, err
+	}
+	r, err := s.GetPayeeRule(id)
+	if err != nil {
+		return ref, err
+	}
+	name := r.Name
+	if name == "" || name == autoRuleName(r.PayeeValue, r.SetCategoryName) {
+		name = autoRuleName(r.PayeeValue, ref.Name)
+	}
+	_, err = s.DB.Exec(`UPDATE payee_rules SET set_category_id=?, name=? WHERE id=?`, categoryID, name, id)
+	return ref, err
+}
+
+// RuleView is a rule with how it applies to the transactions already saved.
+type RuleView struct {
+	models.PayeeRule
+	Matches  int // saved transactions this rule is the first match for
+	Misfiled int // of those, how many are not in the rule's category
+}
+
+// CustomName reports whether the rule has a name worth showing next to its match text.
+func (v RuleView) CustomName() bool {
+	n := strings.TrimSpace(v.Name)
+	return n != "" && !strings.EqualFold(n, v.PayeeValue) && n != autoRuleName(v.PayeeValue, v.SetCategoryName)
+}
+
+// FormJSON holds the rule's editable fields keyed by form input name.
+func (v RuleView) FormJSON() string {
+	id := func(p *int64) string {
+		if p == nil {
+			return ""
+		}
+		return strconv.FormatInt(*p, 10)
+	}
+	dec := func(p *int64) string {
+		if p == nil {
+			return ""
+		}
+		c, sign := *p, ""
+		if c < 0 {
+			c, sign = -c, "-"
+		}
+		return fmt.Sprintf("%s%d.%02d", sign, c/100, c%100)
+	}
+	b, _ := json.Marshal(map[string]string{
+		"payee_match":     v.PayeeMatch,
+		"payee_value":     v.PayeeValue,
+		"set_category_id": id(v.SetCategoryID),
+		"set_person":      v.SetPerson,
+		"rename_payee":    v.RenamePayee,
+		"name":            v.Name,
+		"account_id":      id(v.AccountID),
+		"notes_contains":  v.NotesContains,
+		"amount_min":      dec(v.AmountMin),
+		"amount_max":      dec(v.AmountMax),
+		"set_tags":        v.SetTags,
+	})
+	return string(b)
+}
+
+type ruleTx struct {
+	id      int64
+	payee   string
+	notes   string
+	amount  int64
+	account int64
+	cat     sql.NullInt64
+}
+
+// ruleTransactions lists saved transactions a payee rule could re-file.
+func (s *Store) ruleTransactions() ([]ruleTx, error) {
+	rows, err := s.DB.Query(`SELECT id, COALESCE(payee_name,''), COALESCE(notes,''), amount, account_id, category_id
+		FROM transactions WHERE deleted_at IS NULL AND transfer_id IS NULL AND is_split=0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ruleTx
+	for rows.Next() {
+		var t ruleTx
+		if err := rows.Scan(&t.id, &t.payee, &t.notes, &t.amount, &t.account, &t.cat); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func misfiled(r *models.PayeeRule, t ruleTx) bool {
+	return r.SetCategoryID != nil && (!t.cat.Valid || t.cat.Int64 != *r.SetCategoryID)
+}
+
+// RuleViews returns every rule with its match counts.
+func (s *Store) RuleViews() ([]RuleView, error) {
+	rules, err := s.ListPayeeRules()
+	if err != nil {
+		return nil, err
+	}
+	txs, err := s.ruleTransactions()
+	if err != nil {
+		return nil, err
+	}
+	idx := make(map[int64]int, len(rules))
+	out := make([]RuleView, len(rules))
+	for i, r := range rules {
+		out[i].PayeeRule = r
+		idx[r.ID] = i
+	}
+	for _, t := range txs {
+		r := MatchPayeeRule(rules, t.payee, t.notes, t.amount, t.account)
+		if r == nil {
+			continue
+		}
+		v := &out[idx[r.ID]]
+		v.Matches++
+		if misfiled(r, t) {
+			v.Misfiled++
+		}
+	}
+	return out, nil
+}
+
+// MisfiledByRule returns saved transactions the rule matches first that sit
+// in some other category (or none).
+func (s *Store) MisfiledByRule(id int64) ([]int64, *models.PayeeRule, error) {
+	rules, err := s.ListPayeeRules()
+	if err != nil {
+		return nil, nil, err
+	}
+	var rule *models.PayeeRule
+	for i := range rules {
+		if rules[i].ID == id {
+			rule = &rules[i]
+		}
+	}
+	if rule == nil {
+		return nil, nil, sql.ErrNoRows
+	}
+	txs, err := s.ruleTransactions()
+	if err != nil {
+		return nil, nil, err
+	}
+	var ids []int64
+	for _, t := range txs {
+		if r := MatchPayeeRule(rules, t.payee, t.notes, t.amount, t.account); r != nil && r.ID == id && misfiled(r, t) {
+			ids = append(ids, t.id)
+		}
+	}
+	return ids, rule, nil
+}
+
+// DeletePayeeRuleUndoable deletes a rule and returns an undo id that restores it.
+func (s *Store) DeletePayeeRuleUndoable(id, personID int64) (string, error) {
+	r, err := s.GetPayeeRule(id)
+	if err != nil {
+		return "", err
+	}
+	payload, _ := json.Marshal(r)
+	undoID := uuid.NewString()
+	exp := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM payee_rules WHERE id=?`, id); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(`INSERT INTO undo_ops(id, kind, payload, expires_at, created_by) VALUES (?,?,?,?,?)`,
+		undoID, "rule_delete", string(payload), exp, personID); err != nil {
+		return "", err
+	}
+	return undoID, tx.Commit()
+}
+
+func undoRuleDelete(tx *sql.Tx, payload string) error {
+	var r models.PayeeRule
+	if err := json.Unmarshal([]byte(payload), &r); err != nil {
+		return err
+	}
+	en := 0
+	if r.Enabled {
+		en = 1
+	}
+	_, err := tx.Exec(`INSERT INTO payee_rules(id, sort_order, name, enabled, payee_match, payee_value,
+		amount_min, amount_max, account_id, notes_contains, set_category_id, set_person, rename_payee, set_tags)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.SortOrder, r.Name, en, r.PayeeMatch, r.PayeeValue, r.AmountMin, r.AmountMax, r.AccountID,
+		nullStr(r.NotesContains), r.SetCategoryID, nullStr(r.SetPerson), nullStr(r.RenamePayee), nullStr(r.SetTags))
+	return err
+}
+
 func (s *Store) MovePayeeRule(id int64, dir string) error {
 	rules, err := s.ListPayeeRules()
 	if err != nil {
@@ -132,8 +375,8 @@ func (s *Store) MovePayeeRule(id int64, dir string) error {
 }
 
 // MatchPayeeRule returns the first matching enabled rule (ordered).
-func MatchPayeeRule(rules []models.PayeeRule, payee, notes string, amount, accountID int64) *models.PayeeRule {
-	payeeL := strings.ToLower(strings.TrimSpace(payee))
+func MatchPayeeRule(rules []models.PayeeRule, payeeName, notes string, amount, accountID int64) *models.PayeeRule {
+	payeeN := payee.Normalize(payeeName)
 	notesL := strings.ToLower(notes)
 	for i := range rules {
 		r := &rules[i]
@@ -152,15 +395,15 @@ func MatchPayeeRule(rules []models.PayeeRule, payee, notes string, amount, accou
 		if r.NotesContains != "" && !strings.Contains(notesL, strings.ToLower(r.NotesContains)) {
 			continue
 		}
-		val := strings.ToLower(strings.TrimSpace(r.PayeeValue))
+		val := payee.Normalize(r.PayeeValue)
 		ok := false
 		switch r.PayeeMatch {
 		case "equals":
-			ok = payeeL == val
+			ok = payeeN == val
 		case "starts_with":
-			ok = strings.HasPrefix(payeeL, val)
+			ok = strings.HasPrefix(payeeN, val)
 		default: // contains
-			ok = strings.Contains(payeeL, val)
+			ok = strings.Contains(payeeN, val)
 		}
 		if ok {
 			return r

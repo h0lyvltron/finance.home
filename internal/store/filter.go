@@ -497,20 +497,27 @@ func (s *Store) buildTxFilter(f QueryFilter, useSplits bool) (sqlFrag, error) {
 
 	if useSplits {
 		if len(catIDs) > 0 || len(f.People) > 0 {
-			b.WriteString(` AND EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t.id`)
+			// Match on splits, or on the transaction itself when it has none
+			// (uncategorized imports).
+			var cond string
+			var condArgs []any
 			if len(catIDs) > 0 {
-				b.WriteString(` AND s.category_id IN (` + placeholders(len(catIDs)) + `)`)
+				cond += ` AND x.category_id IN (` + placeholders(len(catIDs)) + `)`
 				for _, id := range catIDs {
-					args = append(args, id)
+					condArgs = append(condArgs, id)
 				}
 			}
 			if len(f.People) > 0 {
-				b.WriteString(` AND s.person IN (` + placeholders(len(f.People)) + `)`)
+				cond += ` AND x.person IN (` + placeholders(len(f.People)) + `)`
 				for _, p := range f.People {
-					args = append(args, p)
+					condArgs = append(condArgs, p)
 				}
 			}
-			b.WriteString(`)`)
+			b.WriteString(` AND (EXISTS (SELECT 1 FROM transaction_splits x WHERE x.transaction_id = t.id` + cond + `)
+				OR (NOT EXISTS (SELECT 1 FROM transaction_splits x0 WHERE x0.transaction_id = t.id)` +
+				strings.ReplaceAll(cond, "x.", "t.") + `))`)
+			args = append(args, condArgs...)
+			args = append(args, condArgs...)
 		}
 	} else {
 		if len(catIDs) > 0 {

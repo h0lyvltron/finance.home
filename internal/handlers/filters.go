@@ -32,11 +32,46 @@ type filterView struct {
 	AmountMinStr string
 	AmountMaxStr string
 	ReviewSel    string // "" | "1" | "0"
+	Compare      string
+	QuickPresets []presetLink
 }
 
 type presetOpt struct {
 	Value string
 	Label string
+}
+
+type presetLink struct {
+	Label  string
+	Href   string
+	Active bool
+}
+
+// Link returns the current report URL with key set to val, keeping the other
+// filters. Picking a date preset resets custom dates and the grain (auto again).
+func (fv filterView) Link(key, val string) string {
+	v := fv.Filter.EncodeQuery()
+	if fv.Grain != "" {
+		v.Set("grain", fv.Grain)
+	}
+	if fv.GroupBy != "" {
+		v.Set("group", fv.GroupBy)
+	}
+	if fv.Compare != "" {
+		v.Set("compare", fv.Compare)
+	}
+	if key == "preset" {
+		v.Del("from")
+		v.Del("to")
+		v.Del("rolling")
+		v.Del("grain")
+	}
+	if val == "" {
+		v.Del(key)
+	} else {
+		v.Set(key, val)
+	}
+	return fv.ReportPath + "?" + v.Encode()
 }
 
 func (a *App) loadFilter(r *http.Request, sess *auth.Session) (store.QueryFilter, error) {
@@ -54,11 +89,12 @@ func (a *App) loadFilter(r *http.Request, sess *auth.Session) (store.QueryFilter
 		}
 	}
 	f := store.ParseQueryFilter(vals)
-	// Only apply default this_month when any filter intent or on report pages —
+	// Report pages default to a year so trends have something to show;
 	// Activity without params stays "all recent" unless date fields present.
 	if f.DatePreset == "" && f.DateFrom == "" && f.DateTo == "" && f.RollingDays == 0 {
-		if strings.HasPrefix(r.URL.Path, "/explore") || strings.HasPrefix(r.URL.Path, "/reports") {
-			f.DatePreset = "this_month"
+		if strings.HasPrefix(r.URL.Path, "/explore") || strings.HasPrefix(r.URL.Path, "/reports") ||
+			strings.HasPrefix(r.URL.Path, "/trends") {
+			f.DatePreset = "last_12"
 		}
 	}
 	f.ResolveDates(a.household(), time.Now())
@@ -87,12 +123,34 @@ func (a *App) filterViewFor(r *http.Request, sess *auth.Session, f store.QueryFi
 			{Value: "last_month", Label: "Last month"},
 			{Value: "last_30", Label: "Last 30 days"},
 			{Value: "last_90", Label: "Last 90 days"},
+			{Value: "last_12", Label: "Last 12 months"},
 			{Value: "ytd", Label: "YTD"},
 			{Value: "this_year", Label: "This year"},
 			{Value: "rolling", Label: "Rolling"},
 			{Value: "custom", Label: "Custom"},
 			{Value: "all", Label: "All time"},
 		},
+	}
+	if r.FormValue("compare") == "ly" {
+		fv.Compare = "ly"
+	}
+	quick := []presetOpt{
+		{Value: "this_month", Label: "This month"},
+		{Value: "last_month", Label: "Last month"},
+		{Value: "last_90", Label: "3 months"},
+		{Value: "last_12", Label: "12 months"},
+		{Value: "ytd", Label: "Year to date"},
+		{Value: "all", Label: "All time"},
+	}
+	for _, p := range quick {
+		fv.QuickPresets = append(fv.QuickPresets, presetLink{
+			Label:  p.Label,
+			Href:   fv.Link("preset", p.Value),
+			Active: f.DatePreset == p.Value,
+		})
+	}
+	if f.DatePreset == "custom" || f.DatePreset == "rolling" || f.DatePreset == "last_30" || f.DatePreset == "this_year" {
+		fv.QuickPresets = append(fv.QuickPresets, presetLink{Label: dateChipLabel(f), Active: true})
 	}
 	if f.AmountMin != nil {
 		fv.AmountMinStr = formatFilterAmount(*f.AmountMin)
@@ -208,7 +266,7 @@ func (a *App) buildChips(r *http.Request, f store.QueryFilter, basePath, grain, 
 			removeIntFromValues(v, "category", id)
 		})
 	}
-	tags, _ := a.Store.ListTags()
+	tags, _ := a.Store.ListAllTags()
 	tagName := map[int64]string{}
 	for _, tg := range tags {
 		tagName[tg.ID] = "#" + tg.Name

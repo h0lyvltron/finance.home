@@ -27,9 +27,88 @@ func compareMode(r *http.Request) string {
 	return ""
 }
 
+// reportGrain returns the grain the user picked (kept in links) and the grain to
+// draw with, which falls back to one sized for the date range.
+func reportGrain(r *http.Request, f store.QueryFilter) (explicit, effective string) {
+	explicit = strings.TrimSpace(r.FormValue("grain"))
+	effective = explicit
+	if effective == "" {
+		effective = store.AutoGrain(f.DateFrom, f.DateTo)
+	}
+	return explicit, effective
+}
+
+func (a *App) trendsPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	d := a.base(r, sess)
+	d.Nav = "trends"
+	a.withQuickAdd(&d)
+	a.withFilterOptions(&d)
+
+	f, err := a.loadFilter(r, sess)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	explicit, grain := reportGrain(r, f)
+	h := a.household()
+	now := time.Now()
+
+	points, err := a.Store.CashFlow(f, grain, h, now)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	// Start at the first period with data, so a range that reaches back
+	// before the first import isn't padded (or its averages diluted) by
+	// empty periods.
+	first := len(points)
+	for i, p := range points {
+		if p.Income != 0 || p.Expense != 0 {
+			first = i
+			break
+		}
+	}
+	points = points[first:]
+	for _, p := range points {
+		d.IncomeTotal += p.Income
+		d.ExpenseTotal += p.Expense
+	}
+	d.PeriodCount = len(points)
+	d.ReportTotal = d.IncomeTotal - d.ExpenseTotal
+	if d.PeriodCount > 0 {
+		d.AvgIncome = d.IncomeTotal / int64(d.PeriodCount)
+		d.AvgExpense = d.ExpenseTotal / int64(d.PeriodCount)
+	}
+
+	segs, _, err := a.Store.SpendingExplore(f, "category", 8, h, now)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	pt, err := a.Store.SegmentPivot(f, "category", grain, h, now)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	for len(pt.ColKeys) > 1 && pt.ColTotals[pt.ColKeys[0]] == 0 {
+		pt.ColKeys, pt.ColLabels = pt.ColKeys[1:], pt.ColLabels[1:]
+	}
+	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
+
+	d.Filter = a.filterViewFor(r, sess, f, "/trends", explicit, "")
+	d.Grain = grain
+	d.CashFlow = points
+	d.Segments = segs
+	d.ChartJSON = template.JS(store.IncomeSpendingChart(points))
+	d.TrendChartJSON = template.JS(store.PivotChart(pt))
+	d.CategoryChartJSON = template.JS(store.CategoryChart(segs, false))
+	d.ShowChart = d.IncomeTotal != 0 || d.ExpenseTotal != 0
+	a.Render.RenderHTTP(w, "trends", d)
+}
+
 func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
-	d.Nav = "explore"
+	d.Nav = "trends"
 	a.withQuickAdd(&d)
 	a.withFilterOptions(&d)
 
@@ -73,6 +152,7 @@ func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 	d.GroupBy = groupBy
 	d.Segments = segs
 	d.ReportTotal = grand
+	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
 	d.ChartJSON = template.JS(store.CategoryChart(segs, d.CompareMode == "ly"))
 	d.DrillBase = "/transactions"
 
@@ -81,7 +161,7 @@ func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 
 func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
-	d.Nav = "explore"
+	d.Nav = "trends"
 	a.withQuickAdd(&d)
 	a.withFilterOptions(&d)
 
@@ -90,10 +170,7 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	grain := strings.TrimSpace(r.FormValue("grain"))
-	if grain == "" {
-		grain = "month"
-	}
+	explicit, grain := reportGrain(r, f)
 	h := a.household()
 	now := time.Now()
 	points, err := a.Store.CashFlow(f, grain, h, now)
@@ -123,10 +200,11 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 		}
 	}
 
-	fv := a.filterViewFor(r, sess, f, "/reports/cashflow", grain, "")
+	fv := a.filterViewFor(r, sess, f, "/reports/cashflow", explicit, "")
 	d.Filter = fv
 	d.Grain = grain
 	d.CashFlow = points
+	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
 	d.IncomeTotal = income
 	d.ExpenseTotal = expense
 	d.ReportTotal = net
@@ -138,7 +216,7 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 
 func (a *App) pivotPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
-	d.Nav = "explore"
+	d.Nav = "trends"
 	a.withQuickAdd(&d)
 	a.withFilterOptions(&d)
 
@@ -151,16 +229,16 @@ func (a *App) pivotPage(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 	if groupBy == "" {
 		groupBy = "category"
 	}
-	grain := strings.TrimSpace(r.FormValue("grain"))
-	if grain == "" {
-		grain = "month"
+	explicit, grain := reportGrain(r, f)
+	if grain == "day" {
+		grain = "week"
 	}
 	pt, err := a.Store.SegmentPivot(f, groupBy, grain, a.household(), time.Now())
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	fv := a.filterViewFor(r, sess, f, "/reports/pivot", grain, groupBy)
+	fv := a.filterViewFor(r, sess, f, "/reports/pivot", explicit, groupBy)
 	d.Filter = fv
 	d.GroupBy = groupBy
 	d.Grain = grain
@@ -175,7 +253,7 @@ func (a *App) pivotPage(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 
 func (a *App) networthPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
-	d.Nav = "explore"
+	d.Nav = "trends"
 	a.withQuickAdd(&d)
 	a.withFilterOptions(&d)
 
@@ -205,7 +283,7 @@ func (a *App) networthPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 
 func (a *App) budgetReportPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
-	d.Nav = "explore"
+	d.Nav = "trends"
 	a.withQuickAdd(&d)
 	a.withFilterOptions(&d)
 
@@ -245,7 +323,7 @@ func monthBoundsYM(ym string) (from, to string, err error) {
 
 func (a *App) savingsRatePage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d := a.base(r, sess)
-	d.Nav = "explore"
+	d.Nav = "trends"
 	a.withQuickAdd(&d)
 	a.withFilterOptions(&d)
 

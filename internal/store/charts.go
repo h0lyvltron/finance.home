@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"finance.home/internal/models"
@@ -151,14 +152,88 @@ func CashFlowChart(points []CashFlowPoint, withCompare bool) string {
 	})
 }
 
+// IncomeSpendingChart puts income and spending side by side per period, with
+// net as a line, so levels are easy to compare. In-progress periods are dimmed.
+func IncomeSpendingChart(points []CashFlowPoint) string {
+	labels := make([]string, len(points))
+	income := make([]float64, len(points))
+	spend := make([]float64, len(points))
+	net := make([]float64, len(points))
+	incomeColor := make([]string, len(points))
+	spendColor := make([]string, len(points))
+	for i, p := range points {
+		labels[i] = p.Label
+		incomeColor[i], spendColor[i] = colorIncome, colorExpense
+		if p.InProgress {
+			labels[i] += " *"
+			incomeColor[i], spendColor[i] = colorIncomeDim, colorExpenseDim
+		}
+		income[i] = dollars(p.Income)
+		spend[i] = dollars(p.Expense)
+		net[i] = dollars(p.Net)
+	}
+	opts := chartBase()
+	opts["interaction"] = map[string]any{"mode": "index", "intersect": false}
+	opts["scales"] = map[string]any{"y": map[string]any{"beginAtZero": true}}
+	return marshalChart(map[string]any{
+		"type": "bar",
+		"data": map[string]any{
+			"labels": labels,
+			"datasets": []map[string]any{
+				{"type": "bar", "label": "Income", "data": income, "backgroundColor": incomeColor, "borderRadius": 4, "order": 2},
+				{"type": "bar", "label": "Spending", "data": spend, "backgroundColor": spendColor, "borderRadius": 4, "order": 2},
+				{
+					"type": "line", "label": "Net (income − spending)", "data": net,
+					"borderColor": colorNet, "backgroundColor": "transparent", "borderWidth": 2,
+					"borderDash": []int{6, 4}, "tension": 0.25, "pointRadius": pointRadius(len(points)),
+					"fill": false, "order": 1,
+				},
+			},
+		},
+		"options": opts,
+		"finance": financeMeta("currency", false),
+	})
+}
+
+// categoryPalette gives stacked series distinct hues; Uncategorized stays grey.
+var categoryPalette = []string{
+	"#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
+}
+
+// seriesColor uses the category's own color unless an earlier series already
+// took it (sibling categories often share one), then falls back to the palette.
+func seriesColor(want string, used map[string]bool, i int) string {
+	want = strings.ToUpper(want)
+	if want != "" && !used[want] {
+		used[want] = true
+		return want
+	}
+	for k := range categoryPalette {
+		c := strings.ToUpper(categoryPalette[(i+k)%len(categoryPalette)])
+		if !used[c] {
+			used[c] = true
+			return c
+		}
+	}
+	return categoryPalette[i%len(categoryPalette)]
+}
+
 // CategoryChart is a horizontal ranking of spend. Amounts are positive magnitudes.
 func CategoryChart(segs []SegmentTotal, withCompare bool) string {
 	labels := make([]string, len(segs))
 	data := make([]float64, len(segs))
 	compare := make([]float64, len(segs))
+	colors := make([]string, len(segs))
 	for i, s := range segs {
 		labels[i] = s.Label
 		data[i] = dollars(s.Amount)
+		colors[i] = colorExpense
+		if s.Color != "" {
+			colors[i] = s.Color
+		}
+		if s.Label == UncategorizedLabel {
+			colors[i] = colorCompare
+		}
 		if s.HasCompare {
 			compare[i] = dollars(s.CompareAmount)
 		}
@@ -166,7 +241,7 @@ func CategoryChart(segs []SegmentTotal, withCompare bool) string {
 	datasets := []map[string]any{{
 		"label":           "Spend",
 		"data":            data,
-		"backgroundColor": colorExpense,
+		"backgroundColor": colors,
 		"borderRadius":    6,
 	}}
 	if withCompare {
@@ -207,17 +282,8 @@ func PivotChart(pt *PivotTable) string {
 		rows = rows[:8]
 		labels = labels[:8]
 	}
-	palette := []string{
-		colorExpense,
-		colorIncome,
-		"var:budget",
-		colorCompare,
-		colorDanger,
-		colorIncomeDim,
-		colorExpenseDim,
-		colorNet,
-	}
 	datasets := make([]map[string]any, 0, len(rows)+1)
+	used := map[string]bool{}
 	for i, rk := range rows {
 		data := make([]float64, len(pt.ColKeys))
 		for j, ck := range pt.ColKeys {
@@ -229,11 +295,15 @@ func PivotChart(pt *PivotTable) string {
 		if i < len(labels) {
 			name = labels[i]
 		}
+		color := seriesColor(pt.RowColors[rk], used, i)
+		if name == UncategorizedLabel {
+			color = colorCompare
+		}
 		datasets = append(datasets, map[string]any{
 			"type":            "bar",
 			"label":           name,
 			"data":            data,
-			"backgroundColor": palette[i%len(palette)],
+			"backgroundColor": color,
 			"stack":           "spend",
 			"order":           2,
 		})

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -106,6 +107,41 @@ func (s *Store) BatchRawCSV(id int64) (string, error) {
 	return raw.String, nil
 }
 
+// BatchHeaders detects headers from the stored CSV with the current parser;
+// headers_json is only a snapshot from upload time.
+func (s *Store) BatchHeaders(id int64) ([]string, error) {
+	raw, err := s.BatchRawCSV(id)
+	if err != nil {
+		return nil, err
+	}
+	headers, _, err := importcsv.DetectHeaders(strings.NewReader(raw), importcsv.DetectDelimiter(raw), true)
+	return headers, err
+}
+
+// CancelImportBatch discards a batch that hasn't been committed (staging rows cascade).
+func (s *Store) CancelImportBatch(id int64) error {
+	res, err := s.DB.Exec(`DELETE FROM import_batches WHERE id=? AND status IN ('uploaded','mapped')`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("only imports that haven't been committed can be cancelled")
+	}
+	return nil
+}
+
+// StagingErrorSummary counts rows that failed to parse and returns the first error.
+func (s *Store) StagingErrorSummary(batchID int64) (int, string, error) {
+	var n int
+	var first sql.NullString
+	err := s.DB.QueryRow(`SELECT COUNT(1),
+		(SELECT exception FROM import_staging_rows WHERE batch_id=? AND COALESCE(exception,'') != ''
+		 ORDER BY row_index LIMIT 1)
+		FROM import_staging_rows WHERE batch_id=? AND COALESCE(exception,'') != ''`,
+		batchID, batchID).Scan(&n, &first)
+	return n, first.String, err
+}
+
 type MapBatchInput struct {
 	BatchID   int64
 	AccountID int64
@@ -144,26 +180,23 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 		return err
 	}
 
-	delim := DelimRune(prof.Delimiter)
-	headers, rows, err := importcsv.DetectHeaders(strings.NewReader(raw), delim, prof.HasHeader)
+	ip := toImportProfile(*prof)
+	headers, rows, err := importcsv.DetectHeaders(strings.NewReader(raw), ip.Delimiter, prof.HasHeader)
 	if err != nil {
 		return err
 	}
-	ip := importcsv.Profile{
-		DateColumn:   prof.DateColumn,
-		DateFormat:   prof.DateFormat,
-		AmountMode:   prof.AmountMode,
-		AmountColumn: prof.AmountColumn,
-		DebitColumn:  prof.DebitColumn,
-		CreditColumn: prof.CreditColumn,
-		PayeeColumn:  prof.PayeeColumn,
-		NotesColumn:  prof.NotesColumn,
-		InvertSign:   prof.InvertSign,
-		HasHeader:    prof.HasHeader,
-		Delimiter:    delim,
+	if missing := importcsv.MissingColumns(headers, ip); len(missing) > 0 {
+		if in.ProfileID == 0 {
+			_ = s.DeleteMappingProfile(profileID)
+		}
+		return fmt.Errorf("mapping uses column(s) not in this file: %q — pick the columns again", missing)
 	}
 	parsed := importcsv.ParseRows(headers, rows, ip)
 	rules, err := s.ListPayeeRules()
+	if err != nil {
+		return err
+	}
+	sg, err := s.NewSuggester()
 	if err != nil {
 		return err
 	}
@@ -213,6 +246,9 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 					rename = rule.RenamePayee
 				}
 				tags = rule.SetTags
+			} else if u := sg.Usual(pr.Payee); u != nil {
+				catID = sql.NullInt64{Int64: u.ID, Valid: true}
+				ruleName = UsualCategoryLabel
 			}
 			// Duplicate advisory
 			if dupID, summary, ok := findFingerprintTx(tx, fp, in.AccountID); ok {
@@ -260,6 +296,65 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 	return tx.Commit()
 }
 
+func toImportProfile(prof models.MappingProfile) importcsv.Profile {
+	return importcsv.Profile{
+		DateColumn:   prof.DateColumn,
+		DateFormat:   prof.DateFormat,
+		AmountMode:   prof.AmountMode,
+		AmountColumn: prof.AmountColumn,
+		DebitColumn:  prof.DebitColumn,
+		CreditColumn: prof.CreditColumn,
+		PayeeColumn:  prof.PayeeColumn,
+		NotesColumn:  prof.NotesColumn,
+		InvertSign:   prof.InvertSign,
+		HasHeader:    prof.HasHeader,
+		Delimiter:    DelimRune(prof.Delimiter),
+	}
+}
+
+// MatchingProfile picks the saved profile that fits headers best: every mapped
+// column must exist; more mapped columns wins, then the most recent.
+func MatchingProfile(profiles []models.MappingProfile, headers []string) *models.MappingProfile {
+	var best *models.MappingProfile
+	bestScore := 0
+	for i := range profiles {
+		p := profiles[i]
+		if p.DateColumn == "" || !p.HasHeader {
+			continue
+		}
+		ip := toImportProfile(p)
+		cols := []string{p.DateColumn, p.PayeeColumn, p.NotesColumn}
+		if p.AmountMode == "debit_credit" {
+			if p.DebitColumn == "" && p.CreditColumn == "" {
+				continue
+			}
+			cols = append(cols, p.DebitColumn, p.CreditColumn)
+		} else {
+			if p.AmountColumn == "" {
+				continue
+			}
+			cols = append(cols, p.AmountColumn)
+		}
+		if len(importcsv.MissingColumns(headers, ip)) > 0 {
+			continue
+		}
+		score := 0
+		for _, c := range cols {
+			if c != "" {
+				score++
+			}
+		}
+		if score > bestScore || (score == bestScore && best != nil && p.ID > best.ID) {
+			best, bestScore = &profiles[i], score
+		}
+	}
+	return best
+}
+
+// UsualCategoryLabel marks staging rows categorized from past transactions
+// rather than by a rule.
+const UsualCategoryLabel = "Usual category"
+
 func nullableInt64(v int64, ok bool) any {
 	if !ok {
 		return nil
@@ -304,13 +399,19 @@ func findManualMatch(tx *sql.Tx, accountID, amount int64, date string, windowDay
 	return 0, "", false
 }
 
+// unlinkedTxSQL restricts transactions to ones not already in a transfer.
+const unlinkedTxSQL = `deleted_at IS NULL AND transfer_id IS NULL
+	AND id NOT IN (SELECT from_tx_id FROM transfers UNION ALL SELECT to_tx_id FROM transfers)`
+
+// suggestTransferPairs pairs staged rows with opposite-amount transactions on
+// other accounts within ±5 days. Closest dates are paired first and each staged
+// row and each existing transaction is used at most once.
 func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 	rows, err := tx.Query(`SELECT id, transaction_date, amount FROM import_staging_rows
-		WHERE batch_id=? AND exception IS NULL AND action IN ('import','merge')`, batchID)
+		WHERE batch_id=? AND exception IS NULL AND action='import' AND amount != 0`, batchID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	type st struct {
 		id   int64
 		date string
@@ -320,31 +421,59 @@ func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 	for rows.Next() {
 		var r st
 		if err := rows.Scan(&r.id, &r.date, &r.amt); err != nil {
+			rows.Close()
 			return err
 		}
 		staging = append(staging, r)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
 
+	type cand struct {
+		rowID, txID int64
+		dist        float64
+	}
+	var cands []cand
 	for _, r := range staging {
-		opp := -r.amt
-		var txID int64
-		var d, payee string
-		err := tx.QueryRow(`SELECT id, transaction_date, COALESCE(payee_name,'') FROM transactions
-			WHERE deleted_at IS NULL AND account_id != ? AND amount = ? AND transfer_id IS NULL
-			ORDER BY ABS(julianday(transaction_date) - julianday(?)) ASC, id DESC LIMIT 1`,
-			accountID, opp, r.date).Scan(&txID, &d, &payee)
+		crow, err := tx.Query(`SELECT id, ABS(julianday(transaction_date) - julianday(?)) FROM transactions
+			WHERE account_id != ? AND amount = ? AND `+unlinkedTxSQL+`
+			AND ABS(julianday(transaction_date) - julianday(?)) <= 5`,
+			r.date, accountID, -r.amt, r.date)
 		if err != nil {
+			return err
+		}
+		for crow.Next() {
+			c := cand{rowID: r.id}
+			if err := crow.Scan(&c.txID, &c.dist); err != nil {
+				crow.Close()
+				return err
+			}
+			cands = append(cands, c)
+		}
+		crow.Close()
+		if err := crow.Err(); err != nil {
+			return err
+		}
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].dist != cands[j].dist {
+			return cands[i].dist < cands[j].dist
+		}
+		if cands[i].rowID != cands[j].rowID {
+			return cands[i].rowID < cands[j].rowID
+		}
+		return cands[i].txID > cands[j].txID
+	})
+	usedRow, usedTx := map[int64]bool{}, map[int64]bool{}
+	for _, c := range cands {
+		if usedRow[c.rowID] || usedTx[c.txID] {
 			continue
 		}
-		if !importcsv.DateWithin(r.date, d, 5) {
-			continue
-		}
-		_, err = tx.Exec(`UPDATE import_staging_rows SET action='transfer_pair', transfer_tx_id=?,
-			match_tx_id=NULL WHERE id=? AND action='import'`, txID, r.id)
-		if err != nil {
+		usedRow[c.rowID], usedTx[c.txID] = true, true
+		if _, err := tx.Exec(`UPDATE import_staging_rows SET action='transfer_pair', transfer_tx_id=?,
+			match_tx_id=NULL WHERE id=? AND action='import'`, c.txID, c.rowID); err != nil {
 			return err
 		}
 	}
@@ -526,9 +655,10 @@ func (s *Store) UpdateStagingRow(rowID int64, categoryID *int64, person, payee, 
 	}
 	_, err := s.DB.Exec(`UPDATE import_staging_rows SET category_id=?, person=?,
 		payee_name=COALESCE(NULLIF(?,''), payee_name), notes=?, action=?,
-		rename_payee=CASE WHEN ? != '' THEN ? ELSE rename_payee END
+		rename_payee=CASE WHEN ? != '' THEN ? ELSE rename_payee END,
+		needs_review=CASE WHEN ? IS NULL THEN 1 ELSE 0 END
 		WHERE id=?`,
-		categoryID, person, payee, nullStr(notes), action, payee, payee, rowID)
+		categoryID, person, payee, nullStr(notes), action, payee, payee, categoryID, rowID)
 	return err
 }
 
@@ -585,10 +715,13 @@ func (s *Store) CommitImport(batchID, personID int64) (int, error) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = tx.Exec(`UPDATE import_batches SET status='committed', imported_count=?, committed_at=? WHERE id=?`,
-		imported, now, batchID)
+	res, err := tx.Exec(`UPDATE import_batches SET status='committed', imported_count=?, committed_at=?
+		WHERE id=? AND status != 'committed'`, imported, now, batchID)
 	if err != nil {
 		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return 0, fmt.Errorf("batch already committed")
 	}
 	return imported, tx.Commit()
 }
@@ -661,11 +794,12 @@ func commitTransferPair(tx *sql.Tx, accountID int64, r models.StagingRow, batchI
 		return commitNewImport(tx, accountID, r, batchID, personID)
 	}
 	otherID := *r.TransferTxID
-	var otherAcct, otherAmt int64
-	var otherDate string
-	err := tx.QueryRow(`SELECT account_id, amount, transaction_date FROM transactions WHERE id=? AND deleted_at IS NULL`,
-		otherID).Scan(&otherAcct, &otherAmt, &otherDate)
-	if err != nil {
+	var otherAmt int64
+	err := tx.QueryRow(`SELECT amount FROM transactions WHERE id=? AND account_id != ? AND `+unlinkedTxSQL,
+		otherID, accountID).Scan(&otherAmt)
+	if err != nil || r.Amount == 0 || otherAmt != -r.Amount {
+		// Counterpart gone, edited, or already paired (by this or an earlier
+		// commit): import as a plain transaction instead.
 		return commitNewImport(tx, accountID, r, batchID, personID)
 	}
 	xferCat, err := categoryIDByKindNameTx(tx, "transfer", "Transfer")
@@ -692,28 +826,27 @@ func commitTransferPair(tx *sql.Tx, accountID int64, r models.StagingRow, batchI
 	if err != nil {
 		return err
 	}
-	// Update other side to Transfer category if not already linked
-	_, _ = tx.Exec(`UPDATE transactions SET category_id=?, needs_review=0,
-		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, xferCat, otherID)
-
-	var fromID, toID int64
+	fromID, toID := otherID, newID
 	if r.Amount < 0 {
 		fromID, toID = newID, otherID
-	} else {
-		fromID, toID = otherID, newID
 	}
-	// Prefer from = negative amount
-	var fromAmt int64
-	_ = tx.QueryRow(`SELECT amount FROM transactions WHERE id=?`, fromID).Scan(&fromAmt)
-	if fromAmt > 0 {
-		fromID, toID = toID, fromID
-	}
-	tres, err := tx.Exec(`INSERT INTO transfers(from_tx_id, to_tx_id) VALUES (?,?)`, fromID, toID)
+	tres, err := tx.Exec(`INSERT INTO transfers(from_tx_id, to_tx_id) VALUES (?,?) ON CONFLICT DO NOTHING`, fromID, toID)
 	if err != nil {
 		return err
 	}
+	if n, _ := tres.RowsAffected(); n == 0 {
+		_, err = tx.Exec(`DELETE FROM transaction_splits WHERE transaction_id=?`, newID)
+		if err == nil {
+			_, err = tx.Exec(`UPDATE transactions SET category_id=NULL, needs_review=1 WHERE id=?`, newID)
+		}
+		return err
+	}
 	xferID, _ := tres.LastInsertId()
-	_, err = tx.Exec(`UPDATE transactions SET transfer_id=? WHERE id IN (?,?)`, xferID, fromID, toID)
+	if _, err := tx.Exec(`UPDATE transactions SET transfer_id=? WHERE id IN (?,?)`, xferID, fromID, toID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`UPDATE transactions SET category_id=?, needs_review=0,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, xferCat, otherID)
 	return err
 }
 

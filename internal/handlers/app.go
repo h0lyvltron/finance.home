@@ -62,6 +62,16 @@ type pageData struct {
 	Batch          *models.ImportBatch
 	Profiles       []models.MappingProfile
 	Rules          []models.PayeeRule
+	RuleViews      []store.RuleView
+	RuleQuery      string
+	// categories page
+	CategoryGroups     []store.CategoryGroup
+	ArchivedCategories []store.CategoryView
+	Swatches           []string
+	// tags
+	TagViews         []store.TagView
+	ArchivedTagViews []store.TagView
+	TxSummary        *txSummaryView
 	StagingRows    []models.StagingRow
 	DrawerRow      *models.StagingRow
 	Headers        []string
@@ -72,6 +82,8 @@ type pageData struct {
 	TotalPages     int
 	ExceptionsOnly bool
 	ImportedCount  int
+	ErrorCount     int
+	FirstError     string
 	// filters / reports
 	Filter       filterView
 	GroupBy      string
@@ -85,6 +97,15 @@ type pageData struct {
 	ChartJSON    template.JS
 	ShowChart    bool
 	DrillBase    string
+	// trends overview
+	TrendChartJSON    template.JS
+	CategoryChartJSON template.JS
+	AvgExpense        int64
+	AvgIncome         int64
+	PeriodCount       int
+	ReviewGroups      []store.ReviewGroup
+	UncatCount        int
+	UncatSpend        int64
 	QueryString  string
 	// plan / home (slice 4)
 	PlanTab      string
@@ -179,9 +200,9 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", a.requireAuth(a.home))
 	mux.HandleFunc("POST /dashboard/range", a.requireAuth(a.csrf(a.dashboardSetRange)))
 	mux.HandleFunc("POST /dashboard/widgets", a.requireAuth(a.csrf(a.dashboardAddWidget)))
-	mux.HandleFunc("POST /dashboard/widgets/reorder", a.requireAuth(a.csrf(a.dashboardReorderWidgets)))
-	mux.HandleFunc("POST /dashboard/widgets/{id}/move", a.requireAuth(a.csrf(a.dashboardMoveWidget)))
-	mux.HandleFunc("POST /dashboard/widgets/{id}/width", a.requireAuth(a.csrf(a.dashboardSetWidth)))
+	mux.HandleFunc("POST /dashboard/compact", a.requireAuth(a.csrf(a.dashboardCompact)))
+	mux.HandleFunc("POST /dashboard/reset", a.requireAuth(a.csrf(a.dashboardReset)))
+	mux.HandleFunc("POST /dashboard/widgets/{id}/place", a.requireAuth(a.csrf(a.dashboardPlaceWidget)))
 	mux.HandleFunc("POST /dashboard/widgets/{id}/delete", a.requireAuth(a.csrf(a.dashboardRemoveWidget)))
 	mux.HandleFunc("GET /plan", a.requireAuth(a.planPage))
 	mux.HandleFunc("POST /plan/settings", a.requireAuth(a.csrf(a.planSettingsPost)))
@@ -207,6 +228,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /transactions/quick", a.requireAuth(a.csrf(a.quickAdd)))
 	mux.HandleFunc("POST /transactions/{id}/delete", a.requireAuth(a.csrf(a.transactionDelete)))
 
+	mux.HandleFunc("GET /trends", a.requireAuth(a.trendsPage))
 	mux.HandleFunc("GET /explore", a.requireAuth(a.explorePage))
 	mux.HandleFunc("GET /reports/cashflow", a.requireAuth(a.cashflowPage))
 	mux.HandleFunc("GET /reports/pivot", a.requireAuth(a.pivotPage))
@@ -242,8 +264,20 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /drafts/{id}/delete", a.requireAuth(a.csrf(a.draftDelete)))
 	mux.HandleFunc("GET /categories", a.requireAuth(a.categoriesPage))
 	mux.HandleFunc("POST /categories", a.requireAuth(a.csrf(a.categoryCreate)))
+	mux.HandleFunc("POST /categories/{id}", a.requireAuth(a.csrf(a.categoryUpdate)))
+	mux.HandleFunc("POST /categories/{id}/move", a.requireAuth(a.csrf(a.categoryMove)))
+	mux.HandleFunc("POST /categories/{id}/archive", a.requireAuth(a.csrf(a.categoryArchive)))
+	mux.HandleFunc("POST /categories/{id}/restore", a.requireAuth(a.csrf(a.categoryRestore)))
+	mux.HandleFunc("POST /categories/{id}/merge", a.requireAuth(a.csrf(a.categoryMerge)))
 	mux.HandleFunc("GET /tags", a.requireAuth(a.tagsPage))
 	mux.HandleFunc("POST /tags", a.requireAuth(a.csrf(a.tagCreate)))
+	mux.HandleFunc("GET /tags/options", a.requireAuth(a.tagOptions))
+	mux.HandleFunc("POST /tags/apply", a.requireAuth(a.csrf(a.tagApply)))
+	mux.HandleFunc("POST /tags/{id}", a.requireAuth(a.csrf(a.tagRename)))
+	mux.HandleFunc("POST /tags/{id}/merge", a.requireAuth(a.csrf(a.tagMerge)))
+	mux.HandleFunc("POST /tags/{id}/archive", a.requireAuth(a.csrf(a.tagArchive)))
+	mux.HandleFunc("POST /tags/{id}/restore", a.requireAuth(a.csrf(a.tagRestore)))
+	mux.HandleFunc("POST /tags/{id}/delete", a.requireAuth(a.csrf(a.tagDelete)))
 	mux.HandleFunc("GET /payees", a.requireAuth(a.payeesPage))
 	mux.HandleFunc("POST /payees", a.requireAuth(a.csrf(a.payeeCreate)))
 
@@ -257,6 +291,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /import/{id}/commit", a.requireAuth(a.csrf(a.importCommit)))
 	mux.HandleFunc("GET /import/{id}/done", a.requireAuth(a.importDone))
 	mux.HandleFunc("POST /import/{id}/undo", a.requireAuth(a.csrf(a.importUndo)))
+	mux.HandleFunc("POST /import/{id}/cancel", a.requireAuth(a.csrf(a.importCancel)))
+
+	mux.HandleFunc("GET /categorize/options", a.requireAuth(a.categorizeOptions))
+	mux.HandleFunc("GET /categorize/similar", a.requireAuth(a.categorizeSimilar))
+	mux.HandleFunc("POST /categorize", a.requireAuth(a.csrf(a.categorizePost)))
 
 	mux.HandleFunc("GET /review", a.requireAuth(a.reviewList))
 	mux.HandleFunc("POST /review/{id}/confirm", a.requireAuth(a.csrf(a.reviewConfirm)))
@@ -264,6 +303,10 @@ func (a *App) Routes() http.Handler {
 
 	mux.HandleFunc("GET /rules", a.requireAuth(a.rulesPage))
 	mux.HandleFunc("POST /rules", a.requireAuth(a.csrf(a.ruleCreate)))
+	mux.HandleFunc("POST /rules/{id}", a.requireAuth(a.csrf(a.ruleUpdate)))
+	mux.HandleFunc("POST /rules/{id}/category", a.requireAuth(a.csrf(a.ruleCategory)))
+	mux.HandleFunc("POST /rules/{id}/enabled", a.requireAuth(a.csrf(a.ruleEnabled)))
+	mux.HandleFunc("POST /rules/{id}/apply", a.requireAuth(a.csrf(a.ruleApply)))
 	mux.HandleFunc("POST /rules/{id}/delete", a.requireAuth(a.csrf(a.ruleDelete)))
 	mux.HandleFunc("POST /rules/{id}/move", a.requireAuth(a.csrf(a.ruleMove)))
 

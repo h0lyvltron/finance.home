@@ -1,94 +1,176 @@
-{{define "explore"}}
-<!DOCTYPE html>
-<html lang="en">
+{{define "report-head"}}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Spending Explore — {{.Household.Name}}</title>
+  <title>{{.}}</title>
   <link rel="stylesheet" href="/static/css/app.css">
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/js/chart-adapter.js"></script>
   <script type="module" src="/static/vendor/datastar.js"></script>
 </head>
+{{end}}
+
+{{define "report-empty"}}
+<div class="panel empty">
+  <h2>Nothing in this period</h2>
+  <p>No income or spending matches these filters.</p>
+  <p><a class="btn btn-ghost" href="{{.Filter.Link "preset" "last_12"}}">Last 12 months</a>
+     <a class="btn btn-ghost" href="{{.Filter.Link "preset" "all"}}">All time</a></p>
+</div>
+{{end}}
+
+{{define "trends"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "report-head" (printf "Trends — %s" .Household.Name)}}
 <body data-signals="{filtersOpen: false}">
 <div class="app-shell wide explore-layout">
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <div class="spread" style="margin:.5rem 0 1rem">
-    <div>
-      <h1 style="margin:0">Spending Explore</h1>
-      <p class="muted small" style="margin:.25rem 0 0">Group spending, then drill into transactions.</p>
+  <h1 style="margin:.5rem 0">Trends</h1>
+  {{template "report-nav" dict "NavReport" "overview" "Filter" .Filter}}
+
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      {{template "toolbar-range" .}}
+      {{template "toolbar-grain" .}}
+      {{template "toolbar-filters" .}}
     </div>
-    {{if eq .CompareMode "ly"}}
-    <a class="chip chip-ok" href="/explore?{{.Filter.QueryString}}&group={{.GroupBy}}">Compare off</a>
+
+    {{template "uncat-banner" .}}
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="tiny muted">Income</div>
+        <div class="stat-value pos">{{money .IncomeTotal .Currency}}</div>
+        <div class="tiny faint">avg {{money .AvgIncome .Currency}} / {{.Grain}}</div>
+      </div>
+      <div class="stat-card">
+        <div class="tiny muted">Spending</div>
+        <div class="stat-value neg">{{moneyAbs .ExpenseTotal .Currency}}</div>
+        <div class="tiny faint">avg {{moneyAbs .AvgExpense .Currency}} / {{.Grain}}</div>
+      </div>
+      <div class="stat-card">
+        <div class="tiny muted">Net</div>
+        <div class="stat-value {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div>
+        <div class="tiny faint">{{if lt .ReportTotal 0}}spent more than earned{{else}}kept{{end}}</div>
+      </div>
+      <div class="stat-card">
+        <div class="tiny muted">Top category</div>
+        {{if .Segments}}{{$top := index .Segments 0}}
+        <div class="stat-value" style="font-size:1.15rem">{{$top.Label}}</div>
+        <div class="tiny faint">{{moneyAbs $top.Amount .Currency}} · {{printf "%.0f" $top.SharePct}}% of spending</div>
+        {{else}}<div class="stat-value faint">—</div>{{end}}
+      </div>
+    </div>
+
+    {{if not .ShowChart}}
+    {{template "report-empty" .}}
     {{else}}
-    <a class="chip" href="/explore?{{.Filter.QueryString}}&group={{.GroupBy}}&compare=ly">vs last year</a>
+    <div class="panel chart-panel" data-chart>
+      <h2>Income vs spending</h2>
+      <p class="tiny muted chart-sub">Per {{.Grain}}. Dashed line is what's left over. * = still in progress.</p>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Income vs spending chart"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
+
+    <div class="panel chart-panel" data-chart>
+      <h2>Spending trend by category</h2>
+      <p class="tiny muted chart-sub">Top categories stacked per {{.Grain}}; the line is total spending.</p>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Spending by category over time"></canvas></div>
+      <script type="application/json">{{.TrendChartJSON}}</script>
+    </div>
+
+    <div class="panel">
+      <div class="spread"><h2 style="margin:0">Where it went</h2>
+        <a class="small" href="/explore?{{.Filter.QueryString}}">All spending →</a></div>
+      {{template "segment-list" .}}
+    </div>
     {{end}}
   </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
 
+{{define "segment-list"}}
+{{if not .Segments}}
+<p class="muted">No spending in this period.</p>
+{{else}}
+<div class="table-list">
+  {{range .Segments}}
+  <a class="list-row" {{txFilterAttr .DrillQuery}} style="color:inherit;text-decoration:none">
+    <div class="grow" style="min-width:0">
+      <div style="font-weight:600">{{.Label}}</div>
+      <div class="tiny muted">{{.Count}} transaction{{if ne .Count 1}}s{{end}} · {{printf "%.0f" .SharePct}}%{{if .HasCompare}} · last year {{moneyAbs .CompareAmount $.Currency}}{{end}}</div>
+      <div class="share-bar"><span class="{{if eq .Label "Uncategorized"}}uncat{{end}}" style="width: {{printf "%.1f" .SharePct}}%"></span></div>
+    </div>
+    <div class="tx-amount neg">{{moneyAbs .Amount $.Currency}}</div>
+  </a>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "toolbar-compare"}}
+<div class="toolbar-row">
+  <span class="toolbar-label">Compare</span>
+  <div class="chip-row">
+    <a class="chip chip-lg {{if ne .CompareMode "ly"}}chip-ok{{end}}" href="{{.Filter.Link "compare" ""}}">Off</a>
+    <a class="chip chip-lg {{if eq .CompareMode "ly"}}chip-ok{{end}}" href="{{.Filter.Link "compare" "ly"}}">Same period last year</a>
+  </div>
+</div>
+{{end}}
+
+{{define "explore"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "report-head" (printf "Spending — %s" .Household.Name)}}
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <h1 style="margin:.5rem 0">Trends</h1>
   {{template "report-nav" dict "NavReport" "explore" "Filter" .Filter}}
 
-  <div class="explore-grid">
-    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
-    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
-
-    <div class="stack explore-main">
-      <form method="get" action="/explore" class="row panel" style="align-items:flex-end">
-        <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
-        {{if eq .CompareMode "ly"}}<input type="hidden" name="compare" value="ly">{{end}}
-        {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
-        {{range .Filter.Filter.CategoryIDs}}<input type="hidden" name="category" value="{{.}}">{{end}}
-        {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
-        {{range .Filter.Filter.TagIDs}}<input type="hidden" name="tag" value="{{.}}">{{end}}
-        <input type="hidden" name="payee" value="{{.Filter.Filter.Payee}}">
-        <input type="hidden" name="q" value="{{.Filter.Filter.Text}}">
-        <div class="field grow">
-          <label for="group">Group by</label>
-          <select id="group" name="group">
-            <option value="category" {{if eq .GroupBy "category"}}selected{{end}}>Category</option>
-            <option value="payee" {{if eq .GroupBy "payee"}}selected{{end}}>Payee</option>
-            <option value="tag" {{if eq .GroupBy "tag"}}selected{{end}}>Tag</option>
-            <option value="person" {{if eq .GroupBy "person"}}selected{{end}}>Person</option>
-            <option value="account" {{if eq .GroupBy "account"}}selected{{end}}>Account</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" type="submit">Apply</button>
-      </form>
-
-      <div class="panel report-totals">
-        <div class="tiny muted">Total spend</div>
-        <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
-        {{if eq .CompareMode "ly"}}
-        <div class="tiny muted" style="margin-top:.5rem">Same period last year · {{moneyAbs .CompareTotal .Currency}}</div>
-        {{end}}
-      </div>
-
-      <div class="panel chart-panel" data-chart>
-        <div class="chart-wrap"><canvas aria-label="Spending chart"></canvas></div>
-        <script type="application/json">{{.ChartJSON}}</script>
-      </div>
-
-      <div class="panel">
-        <h2 style="margin-top:0">Breakdown</h2>
-        {{if not .Segments}}
-        <p class="muted">No expense in this range.</p>
-        {{else}}
-        <div class="table-list">
-          {{range .Segments}}
-          <a class="list-row" {{txFilterAttr .DrillQuery}} style="color:inherit;text-decoration:none">
-            <div>
-              <div style="font-weight:600">{{.Label}}</div>
-              <div class="tiny muted">{{.Count}} tx{{if .HasCompare}} · LY {{moneyAbs .CompareAmount $.Currency}}{{if .Delta}} · Δ {{moneyAbs .Delta $.Currency}}{{end}}{{end}}</div>
-            </div>
-            <div class="tx-amount neg">{{moneyAbs .Amount $.Currency}}</div>
-          </a>
-          {{end}}
-        </div>
-        {{end}}
-      </div>
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      {{template "toolbar-range" .}}
+      {{template "toolbar-group" .}}
+      {{template "toolbar-compare" .}}
+      {{template "toolbar-filters" .}}
     </div>
+
+    {{template "uncat-banner" .}}
+
+    <div class="panel report-totals">
+      <div class="tiny muted">Total spending</div>
+      <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
+      {{if eq .CompareMode "ly"}}
+      <div class="tiny muted" style="margin-top:.5rem">Same period last year · {{moneyAbs .CompareTotal .Currency}}</div>
+      {{end}}
+    </div>
+
+    {{if .Segments}}
+    <div class="panel chart-panel" data-chart>
+      <h2>Spending by {{.GroupBy}}</h2>
+      <p class="tiny muted chart-sub">Tap a row below to see its transactions.</p>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Spending chart"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0">Breakdown</h2>
+      {{template "segment-list" .}}
+    </div>
+    {{else}}
+    {{template "report-empty" .}}
+    {{end}}
   </div>
 </div>
 <button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
@@ -100,97 +182,66 @@
 {{define "cashflow"}}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Cash flow — {{.Household.Name}}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/js/chart-adapter.js"></script>
-  <script type="module" src="/static/vendor/datastar.js"></script>
-</head>
+{{template "report-head" (printf "Cash flow — %s" .Household.Name)}}
 <body data-signals="{filtersOpen: false}">
 <div class="app-shell wide explore-layout">
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <div class="spread" style="margin:.5rem 0 1rem">
-    <div>
-      <h1 style="margin:0">Cash flow</h1>
-      <p class="muted small" style="margin:.25rem 0 0">Income, expense, and net by period. * = in progress.</p>
-    </div>
-    {{if eq .CompareMode "ly"}}
-    <a class="chip chip-ok" href="/reports/cashflow?{{.Filter.QueryString}}&grain={{.Grain}}">Compare off</a>
-    {{else}}
-    <a class="chip" href="/reports/cashflow?{{.Filter.QueryString}}&grain={{.Grain}}&compare=ly">vs last year</a>
-    {{end}}
-  </div>
-
+  <h1 style="margin:.5rem 0">Trends</h1>
   {{template "report-nav" dict "NavReport" "cashflow" "Filter" .Filter}}
 
-  <div class="explore-grid">
-    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
-    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      {{template "toolbar-range" .}}
+      {{template "toolbar-grain" .}}
+      {{template "toolbar-compare" .}}
+      {{template "toolbar-filters" .}}
+    </div>
 
-    <div class="stack explore-main">
-      <form method="get" action="/reports/cashflow" class="row panel" style="align-items:flex-end">
-        <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
-        {{if eq .CompareMode "ly"}}<input type="hidden" name="compare" value="ly">{{end}}
-        {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
-        {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
-        <div class="field grow">
-          <label for="grain">Grain</label>
-          <select id="grain" name="grain">
-            <option value="day" {{if eq .Grain "day"}}selected{{end}}>Day</option>
-            <option value="week" {{if eq .Grain "week"}}selected{{end}}>Week</option>
-            <option value="month" {{if eq .Grain "month"}}selected{{end}}>Month</option>
-            <option value="quarter" {{if eq .Grain "quarter"}}selected{{end}}>Quarter</option>
-            <option value="year" {{if eq .Grain "year"}}selected{{end}}>Year</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" type="submit">Apply</button>
-      </form>
+    {{template "uncat-banner" .}}
 
-      <div class="panel report-totals totals-row">
-        <div><div class="tiny muted">Income</div><div class="report-total pos">{{money .IncomeTotal .Currency}}</div>
-          {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{money .CompareIncome .Currency}}</div>{{end}}</div>
-        <div><div class="tiny muted">Expense</div><div class="report-total neg">{{moneyAbs .ExpenseTotal .Currency}}</div>
-          {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{moneyAbs .CompareExpense .Currency}}</div>{{end}}</div>
-        <div><div class="tiny muted">Net</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div>
-          {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{money .CompareTotal .Currency}}</div>{{end}}</div>
-      </div>
+    <div class="panel report-totals totals-row">
+      <div><div class="tiny muted">Income</div><div class="report-total pos">{{money .IncomeTotal .Currency}}</div>
+        {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{money .CompareIncome .Currency}}</div>{{end}}</div>
+      <div><div class="tiny muted">Spending</div><div class="report-total neg">{{moneyAbs .ExpenseTotal .Currency}}</div>
+        {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{moneyAbs .CompareExpense .Currency}}</div>{{end}}</div>
+      <div><div class="tiny muted">Net</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div>
+        {{if eq .CompareMode "ly"}}<div class="tiny faint">LY {{money .CompareTotal .Currency}}</div>{{end}}</div>
+    </div>
 
-      <div class="panel chart-panel" data-chart>
-        <div class="chart-wrap"><canvas aria-label="Cash flow chart"></canvas></div>
-        <script type="application/json">{{.ChartJSON}}</script>
-      </div>
+    <div class="panel chart-panel" data-chart>
+      <h2>Money in and out</h2>
+      <p class="tiny muted chart-sub">Income above the line, spending below, net as a line. * = still in progress.</p>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Cash flow chart"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
 
-      <div class="panel">
-        <h2 style="margin-top:0">By period</h2>
-        {{if not .CashFlow}}
-        <p class="muted">No cash flow in this range.</p>
-        {{else}}
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead><tr><th>Period</th><th>Income</th><th>Expense</th><th>Net</th>{{if eq $.CompareMode "ly"}}<th>Net LY</th>{{end}}</tr></thead>
-            <tbody>
-            {{range .CashFlow}}
-            <tr>
-              <td>{{.Label}}{{if .InProgress}} <span class="chip chip-warn">in progress</span>{{end}}</td>
-              <td class="num pos">{{money .Income $.Currency}}</td>
-              <td class="num neg">{{moneyAbs .Expense $.Currency}}</td>
-              <td class="num {{if lt .Net 0}}neg{{else}}pos{{end}}">{{money .Net $.Currency}}</td>
-              {{if eq $.CompareMode "ly"}}
-              <td class="num faint">{{if .HasCompare}}{{money .CompareNet $.Currency}}{{else}}—{{end}}</td>
-              {{end}}
-            </tr>
+    <div class="panel">
+      <h2 style="margin-top:0">By {{.Grain}}</h2>
+      {{if not .CashFlow}}
+      <p class="muted">No cash flow in this range.</p>
+      {{else}}
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Period</th><th>Income</th><th>Spending</th><th>Net</th>{{if eq $.CompareMode "ly"}}<th>Net LY</th>{{end}}</tr></thead>
+          <tbody>
+          {{range .CashFlow}}
+          <tr>
+            <td>{{.Label}}{{if .InProgress}} <span class="chip chip-warn">in progress</span>{{end}}</td>
+            <td class="num pos">{{money .Income $.Currency}}</td>
+            <td class="num neg">{{moneyAbs .Expense $.Currency}}</td>
+            <td class="num {{if lt .Net 0}}neg{{else}}pos{{end}}">{{money .Net $.Currency}}</td>
+            {{if eq $.CompareMode "ly"}}
+            <td class="num faint">{{if .HasCompare}}{{money .CompareNet $.Currency}}{{else}}—{{end}}</td>
             {{end}}
-            </tbody>
-          </table>
-        </div>
-        {{end}}
+          </tr>
+          {{end}}
+          </tbody>
+        </table>
       </div>
+      {{end}}
     </div>
   </div>
 </div>
@@ -203,122 +254,86 @@
 {{define "pivot"}}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Segment × time — {{.Household.Name}}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/js/chart-adapter.js"></script>
-  <script type="module" src="/static/vendor/datastar.js"></script>
-</head>
+{{template "report-head" (printf "Category trends — %s" .Household.Name)}}
 <body data-signals="{filtersOpen: false}">
 <div class="app-shell wide explore-layout">
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <div class="spread" style="margin:.5rem 0 1rem">
-    <div>
-      <h1 style="margin:0">Segment × time</h1>
-      <p class="muted small" style="margin:.25rem 0 0">Pivot spend by dimension and grain. Tap a cell to drill down.</p>
-    </div>
-  </div>
-
+  <h1 style="margin:.5rem 0">Trends</h1>
   {{template "report-nav" dict "NavReport" "pivot" "Filter" .Filter}}
 
-  <div class="explore-grid">
-    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
-    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
-
-    <div class="stack explore-main">
-      <form method="get" action="/reports/pivot" class="row panel" style="align-items:flex-end">
-        <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
-        {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
-        {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
-        <div class="field grow">
-          <label for="group">Rows</label>
-          <select id="group" name="group">
-            <option value="category" {{if eq .GroupBy "category"}}selected{{end}}>Category</option>
-            <option value="payee" {{if eq .GroupBy "payee"}}selected{{end}}>Payee</option>
-            <option value="tag" {{if eq .GroupBy "tag"}}selected{{end}}>Tag</option>
-            <option value="person" {{if eq .GroupBy "person"}}selected{{end}}>Person</option>
-            <option value="account" {{if eq .GroupBy "account"}}selected{{end}}>Account</option>
-          </select>
-        </div>
-        <div class="field grow">
-          <label for="grain">Columns</label>
-          <select id="grain" name="grain">
-            <option value="week" {{if eq .Grain "week"}}selected{{end}}>Week</option>
-            <option value="month" {{if eq .Grain "month"}}selected{{end}}>Month</option>
-            <option value="quarter" {{if eq .Grain "quarter"}}selected{{end}}>Quarter</option>
-            <option value="year" {{if eq .Grain "year"}}selected{{end}}>Year</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" type="submit">Apply</button>
-      </form>
-
-      <div class="panel report-totals">
-        <div class="tiny muted">Total spend</div>
-        <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
-      </div>
-
-      {{if .ShowChart}}
-      <div class="panel chart-panel" data-chart>
-        <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Pivot stacked bar"></canvas></div>
-        <script type="application/json">{{.ChartJSON}}</script>
-      </div>
-      {{else}}
-      <p class="tiny muted">Chart hidden when too many rows/columns — table still available.</p>
-      {{end}}
-
-      {{if .Pivot}}
-      <div class="panel">
-        <div class="table-scroll">
-          <table class="data-table pivot-table">
-            <thead>
-              <tr>
-                <th>{{.GroupBy}}</th>
-                {{range $i, $lab := .Pivot.ColLabels}}
-                <th>{{$lab}}{{if eq (index $.Pivot.ColKeys $i) $.Pivot.InProgCol}} *{{end}}</th>
-                {{end}}
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-            {{range $i, $rk := .Pivot.RowKeys}}
-            <tr>
-              <td>{{index $.Pivot.RowLabels $i}}</td>
-              {{range $ck := $.Pivot.ColKeys}}
-              <td class="num">
-                {{$amt := $.Pivot.CellAmount $rk $ck}}
-                {{if $amt}}
-                <a href="/transactions?{{$.Filter.QueryString}}&amp;{{if eq $.GroupBy "category"}}category={{$rk}}{{else if eq $.GroupBy "account"}}account={{$rk}}{{else if eq $.GroupBy "person"}}person={{$rk}}{{else if eq $.GroupBy "payee"}}payee={{index $.Pivot.RowLabels $i}}{{else if eq $.GroupBy "tag"}}tag={{$rk}}{{end}}">{{moneyAbs $amt $.Currency}}</a>
-                {{else}}
-                <span class="faint">—</span>
-                {{end}}
-              </td>
-              {{end}}
-              <td class="num"><strong>{{moneyAbs ($.Pivot.RowTotal $rk) $.Currency}}</strong></td>
-            </tr>
-            {{end}}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th>Total</th>
-                {{range $ck := .Pivot.ColKeys}}
-                <th class="num">{{moneyAbs ($.Pivot.ColTotal $ck) $.Currency}}</th>
-                {{end}}
-                <th class="num">{{moneyAbs .Pivot.Grand .Currency}}</th>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
-      {{else}}
-      <p class="muted">No data.</p>
-      {{end}}
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      {{template "toolbar-range" .}}
+      {{template "toolbar-grain" .}}
+      {{template "toolbar-group" .}}
+      {{template "toolbar-filters" .}}
     </div>
+
+    <div class="panel report-totals">
+      <div class="tiny muted">Total spending</div>
+      <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
+    </div>
+
+    {{if .ShowChart}}
+    <div class="panel chart-panel" data-chart>
+      <h2>Spending by {{.GroupBy}} per {{.Grain}}</h2>
+      <p class="tiny muted chart-sub">Top 8 stacked; the line is total spending. Tap a table cell to see transactions.</p>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Spending over time stacked bar"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
+    {{else if .Pivot.RowKeys}}
+    <p class="tiny muted">Too many columns to chart clearly — pick a bigger "Show by" or a shorter period. The table has everything.</p>
+    {{end}}
+
+    {{if .Pivot.RowKeys}}
+    <div class="panel">
+      <div class="table-scroll">
+        <table class="data-table pivot-table">
+          <thead>
+            <tr>
+              <th>{{.GroupBy}}</th>
+              {{range $i, $lab := .Pivot.ColLabels}}
+              <th>{{$lab}}{{if eq (index $.Pivot.ColKeys $i) $.Pivot.InProgCol}} *{{end}}</th>
+              {{end}}
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+          {{range $i, $rk := .Pivot.RowKeys}}
+          <tr>
+            <td>{{index $.Pivot.RowLabels $i}}</td>
+            {{range $ck := $.Pivot.ColKeys}}
+            <td class="num">
+              {{$amt := $.Pivot.CellAmount $rk $ck}}
+              {{if $amt}}
+              <a href="/transactions?{{$.Filter.QueryString}}&amp;{{if eq $.GroupBy "category"}}{{if eq $rk "0"}}review=1{{else}}category={{$rk}}{{end}}{{else if eq $.GroupBy "account"}}account={{$rk}}{{else if eq $.GroupBy "person"}}person={{$rk}}{{else if eq $.GroupBy "payee"}}payee={{index $.Pivot.RowLabels $i}}{{else if eq $.GroupBy "tag"}}tag={{$rk}}{{end}}">{{moneyAbs $amt $.Currency}}</a>
+              {{else}}
+              <span class="faint">—</span>
+              {{end}}
+            </td>
+            {{end}}
+            <td class="num"><strong>{{moneyAbs ($.Pivot.RowTotal $rk) $.Currency}}</strong></td>
+          </tr>
+          {{end}}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th>Total</th>
+              {{range $ck := .Pivot.ColKeys}}
+              <th class="num">{{moneyAbs ($.Pivot.ColTotal $ck) $.Currency}}</th>
+              {{end}}
+              <th class="num">{{moneyAbs .Pivot.Grand .Currency}}</th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    {{else}}
+    {{template "report-empty" .}}
+    {{end}}
   </div>
 </div>
 <button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
@@ -330,69 +345,57 @@
 {{define "networth"}}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Net worth — {{.Household.Name}}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/js/chart-adapter.js"></script>
-  <script type="module" src="/static/vendor/datastar.js"></script>
-</head>
+{{template "report-head" (printf "Net worth — %s" .Household.Name)}}
 <body data-signals="{filtersOpen: false}">
 <div class="app-shell wide explore-layout">
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <div class="spread" style="margin:.5rem 0 1rem">
-    <div>
-      <h1 style="margin:0">Net worth</h1>
-      <p class="muted small" style="margin:.25rem 0 0">Household and account balances reconstructed over time.</p>
-    </div>
-  </div>
-
+  <h1 style="margin:.5rem 0">Trends</h1>
   {{template "report-nav" dict "NavReport" "networth" "Filter" .Filter}}
 
-  <div class="explore-grid">
-    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
-    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      {{template "toolbar-range" .}}
+    </div>
+    {{template "filter-sheet" .}}
 
-    <div class="stack explore-main">
-      <div class="panel report-totals totals-row">
-        <div><div class="tiny muted">Start</div><div class="report-total">{{money .NetWorthSeries.Start .Currency}}</div></div>
-        <div><div class="tiny muted">End</div><div class="report-total">{{money .NetWorthSeries.End .Currency}}</div></div>
-        <div><div class="tiny muted">Change</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
-      </div>
+    <div class="panel report-totals totals-row">
+      <div><div class="tiny muted">Start</div><div class="report-total">{{money .NetWorthSeries.Start .Currency}}</div></div>
+      <div><div class="tiny muted">End</div><div class="report-total">{{money .NetWorthSeries.End .Currency}}</div></div>
+      <div><div class="tiny muted">Change</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+    </div>
 
-      {{if .ShowChart}}
-      <div class="panel chart-panel" data-chart>
-        <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Net worth chart"></canvas></div>
-        <script type="application/json">{{.ChartJSON}}</script>
-      </div>
-      {{end}}
+    {{if .ShowChart}}
+    <div class="panel chart-panel" data-chart>
+      <h2>Household net worth</h2>
+      <p class="tiny muted chart-sub">All account balances combined, reconstructed from transactions.</p>
+      <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Net worth chart"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
+    {{end}}
 
-      <div class="panel">
-        <h2 style="margin-top:0">Accounts</h2>
-        {{if not .NetWorthSeries.Accounts}}
-        <p class="muted">No accounts.</p>
-        {{else}}
-        <div class="table-list">
-          {{range .NetWorthSeries.Accounts}}
-          {{$n := len .Points}}
-          <div class="list-row">
-            <div>
-              <div style="font-weight:600">{{.AccountName}}</div>
-              <div class="tiny muted">{{.AccountType}}</div>
-            </div>
-            <div class="tx-amount">
-              {{if $n}}{{$last := index .Points (sub $n 1)}}{{money $last.Amount $.Currency}}{{end}}
-            </div>
+    <div class="panel">
+      <h2 style="margin-top:0">Accounts</h2>
+      {{if not .NetWorthSeries.Accounts}}
+      <p class="muted">No accounts.</p>
+      {{else}}
+      <div class="table-list">
+        {{range .NetWorthSeries.Accounts}}
+        {{$n := len .Points}}
+        <div class="list-row">
+          <div>
+            <div style="font-weight:600">{{.AccountName}}</div>
+            <div class="tiny muted">{{.AccountType}}</div>
           </div>
-          {{end}}
+          <div class="tx-amount">
+            {{if $n}}{{$last := index .Points (sub $n 1)}}{{money $last.Amount $.Currency}}{{end}}
+          </div>
         </div>
         {{end}}
       </div>
+      {{end}}
     </div>
   </div>
 </div>
@@ -405,34 +408,26 @@
 {{define "budget-report"}}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Budget vs actual — {{.Household.Name}}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/js/chart-adapter.js"></script>
-  <script type="module" src="/static/vendor/datastar.js"></script>
-</head>
+{{template "report-head" (printf "Budget vs actual — %s" .Household.Name)}}
 <body data-signals="{filtersOpen: false}">
 <div class="app-shell wide explore-layout">
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <div class="spread" style="margin:.5rem 0 1rem">
-    <div>
-      <h1 style="margin:0">Budget vs actual</h1>
-      <p class="muted small" style="margin:.25rem 0 0">Category targets against spend for the month.</p>
-    </div>
-    <form method="get" action="/reports/budget">
-      <input type="month" name="month" value="{{.YearMonth}}" onchange="this.form.submit()">
-    </form>
-  </div>
-
+  <h1 style="margin:.5rem 0">Trends</h1>
   {{template "report-nav" dict "NavReport" "budget" "Filter" .Filter}}
 
-  <div class="stack explore-main" style="margin-top:1rem">
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      <div class="toolbar-row">
+        <span class="toolbar-label">Month</span>
+        <form method="get" action="/reports/budget">
+          <input type="month" name="month" value="{{.YearMonth}}" onchange="this.form.submit()" aria-label="Budget month">
+        </form>
+      </div>
+    </div>
+
     <div class="panel report-totals totals-row">
       <div><div class="tiny muted">Budgeted</div><div class="report-total">{{money .BudgetHealth.Budgeted .Currency}}</div></div>
       <div><div class="tiny muted">Spent</div><div class="report-total">{{money .BudgetHealth.Spent .Currency}}</div></div>
@@ -441,6 +436,8 @@
 
     {{if .ShowChart}}
     <div class="panel chart-panel" data-chart>
+      <h2>Budget vs actual</h2>
+      <p class="tiny muted chart-sub">Only categorized spending counts toward budgets.</p>
       <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Budget vs actual"></canvas></div>
       <script type="application/json">{{.ChartJSON}}</script>
     </div>
@@ -481,58 +478,46 @@
 {{define "savings-rate"}}
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Savings rate — {{.Household.Name}}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/js/chart-adapter.js"></script>
-  <script type="module" src="/static/vendor/datastar.js"></script>
-</head>
+{{template "report-head" (printf "Savings rate — %s" .Household.Name)}}
 <body data-signals="{filtersOpen: false}">
 <div class="app-shell wide explore-layout">
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <div class="spread" style="margin:.5rem 0 1rem">
-    <div>
-      <h1 style="margin:0">Savings rate</h1>
-      <p class="muted small" style="margin:.25rem 0 0">Income kept after expenses{{if .SavingsRate.HasTarget}}, vs household monthly target{{end}}.</p>
-    </div>
-  </div>
-
+  <h1 style="margin:.5rem 0">Trends</h1>
   {{template "report-nav" dict "NavReport" "savings" "Filter" .Filter}}
 
-  <div class="explore-grid">
-    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
-    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+  <div class="stack explore-main">
+    <div class="panel report-toolbar">
+      {{template "toolbar-range" .}}
+      {{template "toolbar-filters" .}}
+    </div>
 
-    <div class="stack explore-main">
-      <div class="panel report-totals totals-row">
-        <div><div class="tiny muted">Rate</div><div class="report-total">{{printf "%.0f" .SavingsRate.RatePct}}%</div></div>
-        <div><div class="tiny muted">Saved</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+    <div class="panel report-totals totals-row">
+      <div><div class="tiny muted">Savings rate</div><div class="report-total">{{printf "%.0f" .SavingsRate.RatePct}}%</div></div>
+      <div><div class="tiny muted">Saved</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+      {{if .SavingsRate.HasTarget}}
+      <div><div class="tiny muted">vs target</div><div class="report-total {{if lt .SavingsRate.VsTargetCents 0}}neg{{else}}pos{{end}}">{{money .SavingsRate.VsTargetCents .Currency}}</div></div>
+      {{end}}
+    </div>
+
+    <div class="panel chart-panel" data-chart>
+      <h2>Share of income kept</h2>
+      <p class="tiny muted chart-sub">Per month: (income − spending) ÷ income.</p>
+      <div class="chart-wrap"><canvas aria-label="Savings rate chart"></canvas></div>
+      <script type="application/json">{{.ChartJSON}}</script>
+    </div>
+
+    <div class="panel">
+      <div class="health-grid">
+        <div><div class="tiny faint">Income</div><div class="num-strong pos">{{money .IncomeTotal .Currency}}</div></div>
+        <div><div class="tiny faint">Spending</div><div class="num-strong neg">{{moneyAbs .ExpenseTotal .Currency}}</div></div>
         {{if .SavingsRate.HasTarget}}
-        <div><div class="tiny muted">vs target</div><div class="report-total {{if lt .SavingsRate.VsTargetCents 0}}neg{{else}}pos{{end}}">{{money .SavingsRate.VsTargetCents .Currency}}</div></div>
+        <div><div class="tiny faint">Target ({{printf "%.0f" .SavingsRate.TargetRatePct}}%)</div><div class="num-strong">{{money .SavingsRate.TargetCents .Currency}}</div></div>
+        {{else}}
+        <div><div class="tiny faint">Tip</div><div class="tiny muted">Set a savings contribution on <a href="/plan">Plan</a> to compare.</div></div>
         {{end}}
-      </div>
-
-      <div class="panel chart-panel" data-chart>
-        <div class="chart-wrap"><canvas aria-label="Savings rate chart"></canvas></div>
-        <script type="application/json">{{.ChartJSON}}</script>
-      </div>
-
-      <div class="panel">
-        <div class="health-grid">
-          <div><div class="tiny faint">Income</div><div class="num-strong pos">{{money .IncomeTotal .Currency}}</div></div>
-          <div><div class="tiny faint">Expense</div><div class="num-strong neg">{{moneyAbs .ExpenseTotal .Currency}}</div></div>
-          {{if .SavingsRate.HasTarget}}
-          <div><div class="tiny faint">Target ({{printf "%.0f" .SavingsRate.TargetRatePct}}%)</div><div class="num-strong">{{money .SavingsRate.TargetCents .Currency}}</div></div>
-          {{else}}
-          <div><div class="tiny faint">Tip</div><div class="tiny muted">Set a savings contribution on <a href="/plan">Plan</a> to compare.</div></div>
-          {{end}}
-        </div>
       </div>
     </div>
   </div>

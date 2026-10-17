@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"finance.home/internal/money"
+	"finance.home/internal/payee"
 )
 
 //go:embed templates/*.html static/css/* static/js/* static/vendor/*
@@ -36,6 +37,7 @@ var Funcs = template.FuncMap{
 	"eq":         func(a, b any) bool { return fmt.Sprint(a) == fmt.Sprint(b) },
 	"ne":         func(a, b any) bool { return fmt.Sprint(a) != fmt.Sprint(b) },
 	"hasPrefix":  strings.HasPrefix,
+	"payeeKey":   payee.Key,
 	"lower":      strings.ToLower,
 	"dict":       dict,
 	"add":        func(a, b int) int { return a + b },

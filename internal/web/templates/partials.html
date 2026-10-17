@@ -8,6 +8,7 @@
   <a href="/transactions" class="{{if eq .Nav "transactions"}}active{{end}}">
     Activity{{if .ReviewCount}}<span class="nav-badge" title="Needs review">{{.ReviewCount}}</span>{{end}}
   </a>
+  <a href="/trends" class="{{if eq .Nav "trends"}}active{{end}}">Trends</a>
   <a href="/plan" class="{{if eq .Nav "plan"}}active{{end}}">Plan</a>
   <a href="/accounts" class="{{if eq .Nav "accounts"}}active{{end}}">Accounts</a>
   <a href="/more" class="{{if eq .Nav "more"}}active{{end}}">More</a>
@@ -36,18 +37,25 @@
   <p>Tap + to capture a spend or income in a few taps.</p>
 </div>
 {{else}}
+<script src="/static/js/categorize.js" defer></script>
+<script src="/static/js/tags.js" defer></script>
+<div class="tx-list-tools" data-tag-scope{{with .TxSummary}} data-filter="{{.Query}}" data-filter-count="{{.Count}}"{{end}}>
+  <span class="tiny muted">{{with .TxSummary}}{{if gt .Count .Shown}}Showing {{.Shown}} of {{.Count}}{{else}}{{.Count}} transaction{{if ne .Count 1}}s{{end}}{{end}}{{end}}</span>
+  <button type="button" class="btn btn-sm btn-ghost" data-tag-select>Select to tag</button>
+</div>
 <div class="panel" id="tx-list">
   {{range .Transactions}}
-  <article class="tx-card">
+  <article class="tx-card" data-tx-row="{{.ID}}">
     <div>
       <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else if .TransferID}}Transfer{{else}}(no payee){{end}}</div>
       <div class="tx-meta">
         {{.TransactionDate}} · {{.AccountName}}
-        {{if .IsSplit}} · Split{{else if .CategoryName}} · {{.CategoryName}}{{end}}
+        {{if .IsSplit}} · Split{{else if not .TransferID}} · {{template "cat-chip" (dict "Target" "tx" "IDs" .ID "Payee" .PayeeName "Amount" .Amount "Account" .AccountID "Current" (ptrID .CategoryID) "Name" .CategoryName "Person" .Person)}}{{end}}
         {{if eq .Status "pending"}} · <span class="chip chip-warn">Pending</span>{{end}}
-        {{if .NeedsReview}} · <span class="chip chip-warn">Review</span>{{end}}
+        {{if .NeedsReview}} · <span class="chip chip-warn" data-review-flag="{{.ID}}">Review</span>{{end}}
         {{if .TransferID}} · <span class="chip">Transfer</span>{{end}}
       </div>
+      {{template "tag-chips" .}}
     </div>
     <div>
       <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
@@ -63,6 +71,12 @@
 </div>
 {{end}}
 {{end}}
+
+{{/* Tap-to-categorize chip; categorize.js opens the picker. Key overrides the merchant match text. */}}
+{{define "cat-chip"}}<button type="button" class="cat-chip{{if not .Name}} cat-none{{end}}{{if .Class}} {{.Class}}{{end}}" data-cat="{{.Target}}" data-ids="{{.IDs}}" data-payee="{{.Payee}}" data-amount="{{.Amount}}" data-account="{{.Account}}" data-current="{{.Current}}" data-person="{{.Person}}" data-key="{{if .Key}}{{.Key}}{{else}}{{payeeKey .Payee}}{{end}}"{{if .Batch}} data-batch="{{.Batch}}"{{end}}{{if .Remember}} data-remember="1"{{else if eq (print .Remember) "false"}} data-remember="false"{{end}}{{if .Title}} data-title="{{.Title}}"{{end}}{{if .Label}} data-label="1"{{end}}>{{if .Label}}{{.Label}}{{else if .Name}}{{.Name}}{{else}}Uncategorized{{end}}</button>{{end}}
+
+{{/* Tag chips link to filtered Activity; tags.js opens the tag sheet from the + button. */}}
+{{define "tag-chips"}}<div class="tx-tags" data-tag-row="{{.ID}}">{{range .Tags}}<a class="tag-chip" href="/transactions?tag={{.ID}}&amp;preset=all" title="All #{{.Name}} transactions">#{{.Name}}</a>{{end}}<button type="button" class="tag-add" data-tag-open data-ids="{{.ID}}" data-payee="{{.PayeeName}}" data-key="{{payeeKey .PayeeName}}" data-amount="{{.Amount}}" title="Add or remove tags" aria-label="Tags">{{if .Tags}}+{{else}}+ tag{{end}}</button></div>{{end}}
 
 {{define "toast"}}
 <div class="toast" id="toast-{{.UndoID}}">

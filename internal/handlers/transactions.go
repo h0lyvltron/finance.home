@@ -38,6 +38,7 @@ func (a *App) transactionsList(w http.ResponseWriter, r *http.Request, sess *aut
 	d.Transactions = txs
 	d.Filter = a.filterViewFor(r, sess, f, "/transactions", "", "")
 	d.QueryString = d.Filter.QueryString
+	d.TxSummary = a.txSummary(f, len(txs), d.QueryString)
 	a.Render.RenderHTTP(w, "transactions", d)
 }
 

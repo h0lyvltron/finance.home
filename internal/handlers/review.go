@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"finance.home/internal/auth"
+	"finance.home/internal/store"
 )
 
 func (a *App) withReviewBadge(d *pageData) {
@@ -17,11 +18,24 @@ func (a *App) reviewList(w http.ResponseWriter, r *http.Request, sess *auth.Sess
 	d.Nav = "transactions"
 	a.withQuickAdd(&d)
 	a.withReviewBadge(&d)
-	items, err := a.Store.ListNeedsReview(100)
+	items, err := a.Store.ListNeedsReview(5000)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	groups := store.GroupForReview(items)
+	if sg, err := a.Store.NewSuggester(); err == nil {
+		for gi := range groups {
+			g := &groups[gi]
+			first := g.Items[0]
+			g.Suggest = sg.For(first.PayeeName, first.Amount, first.AccountID)
+			for i := range g.Items {
+				t := &g.Items[i]
+				t.Suggest = sg.For(t.PayeeName, t.Amount, t.AccountID)
+			}
+		}
+	}
+	d.ReviewGroups = groups
 	d.Transactions = items
 	a.Render.RenderHTTP(w, "review", d)
 }
@@ -45,13 +59,15 @@ func (a *App) reviewConfirm(w http.ResponseWriter, r *http.Request, sess *auth.S
 
 func (a *App) reviewConfirmBulk(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	_ = r.ParseForm()
-	var ids []int64
+	ids := parseIDs(r.FormValue("ids"))
 	for _, v := range r.Form["tx_id"] {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err == nil {
-			ids = append(ids, id)
-		}
+		ids = append(ids, parseIDs(v)...)
 	}
 	_ = a.Store.ConfirmReviewAll(ids)
+	if r.Header.Get("Accept") == "application/json" {
+		n, _ := a.Store.NeedsReviewCount()
+		writeJSON(w, 200, map[string]any{"ids": ids, "reviewCount": n})
+		return
+	}
 	http.Redirect(w, r, "/review", http.StatusSeeOther)
 }

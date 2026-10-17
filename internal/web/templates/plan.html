@@ -91,7 +91,7 @@
       {{range .BudgetLines}}
       <div class="budget-row {{if .ParentID}}budget-child{{else}}budget-parent{{end}}">
         <div class="budget-name">
-          <div style="font-weight:600">{{if .ParentName}}{{.ParentName}} › {{end}}{{.CategoryName}}</div>
+          <div style="font-weight:600">{{if .Color}}<span class="cat-dot cat-dot-inline" style="background: {{.Color}}"></span>{{end}}{{if .ParentName}}{{.ParentName}} › {{end}}{{.CategoryName}}</div>
           <div class="tiny muted">
             {{if .FixedFlexible}}{{.FixedFlexible}} · {{end}}
             spent {{money .SpentCents $.Currency}}

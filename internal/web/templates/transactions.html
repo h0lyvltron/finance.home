@@ -29,6 +29,20 @@
     <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
     <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
     <div class="explore-main">
+      {{with .TxSummary}}{{if .Tags}}
+      <section class="panel tag-summary">
+        <div class="row" style="gap:.35rem;flex-wrap:wrap">{{range .Tags}}<span class="tag-chip tag-chip-lg">#{{.Name}}</span>{{end}}
+          {{if gt (len .Tags) 1}}<span class="tiny muted">any of these</span>{{end}}</div>
+        <div class="tag-summary-stats">
+          <div><div class="tiny muted">Transactions</div><b>{{.Count}}</b></div>
+          <div><div class="tiny muted">Spent</div><b>{{moneyAbs .Out $.Currency}}</b></div>
+          {{if .In}}<div><div class="tiny muted">Money in</div><b>{{moneyAbs .In $.Currency}}</b></div>
+          <div><div class="tiny muted">Net</div><b>{{money .Net $.Currency}}</b></div>{{end}}
+          {{if .FirstDate}}<div><div class="tiny muted">Dates</div><b class="tag-summary-dates">{{.FirstDate}}{{if ne .FirstDate .LastDate}} – {{.LastDate}}{{end}}</b></div>{{end}}
+        </div>
+        <div class="tiny"><a href="{{.ByCategoryURL}}">Breakdown by category →</a> · <a href="/tags">Manage tags</a></div>
+      </section>
+      {{end}}{{end}}
       {{template "tx-list" .}}
     </div>
   </div>

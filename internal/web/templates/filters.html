@@ -38,8 +38,12 @@
     <button type="button" class="btn btn-sm btn-ghost" data-on:click="$filtersOpen = false">Close</button>
   </div>
   <form method="get" action="{{.Filter.ReportPath}}" class="stack" style="margin-top:1rem">
+    {{if .Filter.Compare}}<input type="hidden" name="compare" value="{{.Filter.Compare}}">{{end}}
     {{template "filter-fields" .}}
-    <button class="btn btn-primary btn-block" type="submit">Apply</button>
+    <div class="sheet-actions">
+      <a class="btn btn-ghost" href="{{.Filter.ReportPath}}">Reset</a>
+      <button class="btn btn-primary grow" type="submit">Apply filters</button>
+    </div>
   </form>
   {{template "filter-save" .}}
 </aside>
@@ -50,7 +54,9 @@
   <h2 style="margin:0">Filters</h2>
   <form method="get" action="{{.Filter.ReportPath}}" class="stack">
     {{template "filter-fields" .}}
-    <button class="btn btn-primary btn-block" type="submit">Apply</button>
+    <div class="sticky-apply">
+      <button class="btn btn-primary btn-block" type="submit">Apply</button>
+    </div>
   </form>
   {{template "filter-chips" .}}
   {{template "filter-save" .}}
@@ -76,16 +82,16 @@
 <div class="row" style="align-items:flex-end">
   <div class="field grow">
     <label for="from">From</label>
-    <input id="from" name="from" type="date" value="{{.Filter.Filter.DateFrom}}">
+    <input id="from" name="from" type="date" value="{{.Filter.Filter.DateFrom}}" onchange="this.form.preset.value='custom'">
   </div>
   <div class="field grow">
     <label for="to">To</label>
-    <input id="to" name="to" type="date" value="{{.Filter.Filter.DateTo}}">
+    <input id="to" name="to" type="date" value="{{.Filter.Filter.DateTo}}" onchange="this.form.preset.value='custom'">
   </div>
 </div>
 <div class="field">
   <label for="rolling">Rolling days</label>
-  <input id="rolling" name="rolling" type="number" min="1" max="3650"
+  <input id="rolling" name="rolling" type="number" min="1" max="3650" onchange="this.form.preset.value='rolling'"
          value="{{if .Filter.Filter.RollingDays}}{{.Filter.Filter.RollingDays}}{{else}}30{{end}}">
 </div>
 
@@ -211,12 +217,75 @@
 {{end}}
 
 {{define "report-nav"}}
-<nav class="report-nav row" aria-label="Reports">
-  <a class="chip {{if eq .NavReport "explore"}}chip-ok{{end}}" href="/explore?{{.Filter.QueryString}}">Spending</a>
-  <a class="chip {{if eq .NavReport "cashflow"}}chip-ok{{end}}" href="/reports/cashflow?{{.Filter.QueryString}}">Cash flow</a>
-  <a class="chip {{if eq .NavReport "pivot"}}chip-ok{{end}}" href="/reports/pivot?{{.Filter.QueryString}}">Pivot</a>
-  <a class="chip {{if eq .NavReport "networth"}}chip-ok{{end}}" href="/reports/networth?{{.Filter.QueryString}}">Net worth</a>
-  <a class="chip {{if eq .NavReport "budget"}}chip-ok{{end}}" href="/reports/budget">Budget</a>
-  <a class="chip {{if eq .NavReport "savings"}}chip-ok{{end}}" href="/reports/savings?{{.Filter.QueryString}}">Savings</a>
+<nav class="report-tabs" aria-label="Trends">
+  <a class="{{if eq .NavReport "overview"}}active{{end}}" href="/trends?{{.Filter.QueryString}}">Overview</a>
+  <a class="{{if eq .NavReport "explore"}}active{{end}}" href="/explore?{{.Filter.QueryString}}">Spending</a>
+  <a class="{{if eq .NavReport "pivot"}}active{{end}}" href="/reports/pivot?{{.Filter.QueryString}}">Category trends</a>
+  <a class="{{if eq .NavReport "cashflow"}}active{{end}}" href="/reports/cashflow?{{.Filter.QueryString}}">Cash flow</a>
+  <a class="{{if eq .NavReport "savings"}}active{{end}}" href="/reports/savings?{{.Filter.QueryString}}">Savings</a>
+  <a class="{{if eq .NavReport "networth"}}active{{end}}" href="/reports/networth?{{.Filter.QueryString}}">Net worth</a>
+  <a class="{{if eq .NavReport "budget"}}active{{end}}" href="/reports/budget">Budget</a>
 </nav>
+{{end}}
+
+{{/* Report toolbar: every control applies on tap except the Filters drawer. */}}
+{{define "toolbar-range"}}
+<div class="toolbar-row">
+  <span class="toolbar-label">Period</span>
+  <div class="chip-row">
+    {{range .Filter.QuickPresets}}
+    {{if .Href}}<a class="chip chip-lg {{if .Active}}chip-ok{{end}}" href="{{.Href}}">{{.Label}}</a>
+    {{else}}<span class="chip chip-lg chip-ok">{{.Label}}</span>{{end}}
+    {{end}}
+    <button type="button" class="chip chip-lg" data-on:click="$filtersOpen = true">Custom…</button>
+  </div>
+</div>
+{{end}}
+
+{{define "toolbar-grain"}}
+<div class="toolbar-row">
+  <span class="toolbar-label">Show by</span>
+  <div class="chip-row">
+    <a class="chip chip-lg {{if eq .Grain "week"}}chip-ok{{end}}" href="{{.Filter.Link "grain" "week"}}">Week</a>
+    <a class="chip chip-lg {{if eq .Grain "month"}}chip-ok{{end}}" href="{{.Filter.Link "grain" "month"}}">Month</a>
+    <a class="chip chip-lg {{if eq .Grain "quarter"}}chip-ok{{end}}" href="{{.Filter.Link "grain" "quarter"}}">Quarter</a>
+    <a class="chip chip-lg {{if eq .Grain "year"}}chip-ok{{end}}" href="{{.Filter.Link "grain" "year"}}">Year</a>
+  </div>
+</div>
+{{end}}
+
+{{define "toolbar-group"}}
+<div class="toolbar-row">
+  <span class="toolbar-label">Group by</span>
+  <div class="chip-row">
+    <a class="chip chip-lg {{if eq .GroupBy "category"}}chip-ok{{end}}" href="{{.Filter.Link "group" "category"}}">Category</a>
+    <a class="chip chip-lg {{if eq .GroupBy "payee"}}chip-ok{{end}}" href="{{.Filter.Link "group" "payee"}}">Payee</a>
+    <a class="chip chip-lg {{if eq .GroupBy "account"}}chip-ok{{end}}" href="{{.Filter.Link "group" "account"}}">Account</a>
+    <a class="chip chip-lg {{if eq .GroupBy "person"}}chip-ok{{end}}" href="{{.Filter.Link "group" "person"}}">Person</a>
+    <a class="chip chip-lg {{if eq .GroupBy "tag"}}chip-ok{{end}}" href="{{.Filter.Link "group" "tag"}}">Tag</a>
+  </div>
+</div>
+{{end}}
+
+{{define "toolbar-filters"}}
+<div class="toolbar-row">
+  <span class="toolbar-label">Filters</span>
+  <div class="chip-row">
+    {{range .Filter.Chips}}{{if ne .Key "date"}}
+    <a class="chip chip-active" href="{{.Href}}" title="Remove filter">{{.Label}} <span aria-hidden="true">×</span></a>
+    {{end}}{{end}}
+    <button type="button" class="chip chip-lg" data-on:click="$filtersOpen = true">+ Accounts, people, categories…</button>
+  </div>
+</div>
+{{template "filter-sheet" .}}
+{{end}}
+
+{{define "uncat-banner"}}
+{{if .UncatCount}}
+<div class="alert uncat-banner">
+  <strong>{{.UncatCount}} transaction{{if ne .UncatCount 1}}s{{end}} not categorized yet</strong>
+  ({{moneyAbs .UncatSpend .Currency}} of spending). They're included below as <em>Uncategorized</em>.
+  <a href="/review">Categorize in Review →</a>
+</div>
+{{end}}
 {{end}}

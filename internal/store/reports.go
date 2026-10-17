@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ type SegmentTotal struct {
 	Color         string
 	CompareAmount int64
 	HasCompare    bool
-	Delta         int64 // Amount - CompareAmount
+	Delta         int64   // Amount - CompareAmount
+	SharePct      float64 // share of the grand total, 0–100
 }
 
 // MergeCashFlowCompare attaches same-period-last-year values onto current points.
@@ -117,7 +119,26 @@ type PivotTable struct {
 	RowTotals map[string]int64
 	ColTotals map[string]int64
 	Grand     int64
-	InProgCol string // column key that is in-progress, if any
+	InProgCol string            // column key that is in-progress, if any
+	RowColors map[string]string // row key -> category color, when rows are categories
+}
+
+// categoryColors maps category id (as a string key) to its #RRGGBB color.
+func (s *Store) categoryColors() map[string]string {
+	out := map[string]string{}
+	rows, err := s.DB.Query(`SELECT id, UPPER(COALESCE(color,'')) FROM categories WHERE COALESCE(color,'') != ''`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var c string
+		if rows.Scan(&id, &c) == nil && hexColor.MatchString(c) {
+			out[strconv.FormatInt(id, 10)] = c
+		}
+	}
+	return out
 }
 
 func grainExpr(grain string) string {
@@ -134,6 +155,39 @@ func grainExpr(grain string) string {
 		return `strftime('%Y', t.transaction_date)`
 	default: // month
 		return `strftime('%Y-%m', t.transaction_date)`
+	}
+}
+
+// reportLines yields one row per split plus one row for every transaction that
+// has no splits (uncategorized imports awaiting review), so report totals
+// include money that hasn't been categorized yet. Alias it as s and LEFT JOIN
+// categories c ON c.id = s.category_id; use lineKind for the effective kind.
+const reportLines = `(SELECT sp.transaction_id, sp.category_id, sp.person, sp.amount FROM transaction_splits sp
+		UNION ALL
+		SELECT t0.id, t0.category_id, t0.person, t0.amount FROM transactions t0
+		WHERE NOT EXISTS (SELECT 1 FROM transaction_splits sp0 WHERE sp0.transaction_id = t0.id))`
+
+// lineKind treats uncategorized outflows as expense and inflows as income.
+const lineKind = `(CASE WHEN c.id IS NOT NULL THEN c.kind WHEN s.amount < 0 THEN 'expense' ELSE 'income' END)`
+
+// UncategorizedLabel names the bucket for transactions without a category.
+const UncategorizedLabel = "Uncategorized"
+
+// AutoGrain picks a readable bucket size for a date range.
+func AutoGrain(from, to string) string {
+	a, err1 := time.Parse("2006-01-02", from)
+	b, err2 := time.Parse("2006-01-02", to)
+	if err1 != nil || err2 != nil {
+		return "month"
+	}
+	days := b.Sub(a).Hours() / 24
+	switch {
+	case days <= 45:
+		return "week"
+	case days <= 731:
+		return "month"
+	default:
+		return "quarter"
 	}
 }
 
@@ -159,12 +213,12 @@ func (s *Store) CashFlow(f QueryFilter, grain string, h *models.Household, now t
 	}
 	g := grainExpr(grain)
 	q := `SELECT ` + g + ` AS period,
-		COALESCE(SUM(CASE WHEN c.kind = 'income' THEN s.amount ELSE 0 END), 0) AS income,
-		COALESCE(SUM(CASE WHEN c.kind = 'expense' THEN s.amount ELSE 0 END), 0) AS expense
-		FROM transaction_splits s
+		COALESCE(SUM(CASE WHEN ` + lineKind + ` = 'income' THEN s.amount ELSE 0 END), 0) AS income,
+		COALESCE(SUM(CASE WHEN ` + lineKind + ` = 'expense' THEN s.amount ELSE 0 END), 0) AS expense
+		FROM ` + reportLines + ` s
 		JOIN transactions t ON t.id = s.transaction_id
-		JOIN categories c ON c.id = s.category_id` + frag.joins + `
-		WHERE` + frag.where + ` AND c.kind IN ('income','expense')
+		LEFT JOIN categories c ON c.id = s.category_id` + frag.joins + `
+		WHERE` + frag.where + ` AND ` + lineKind + ` IN ('income','expense')
 		GROUP BY period
 		ORDER BY period`
 	rows, err := s.DB.Query(q, frag.args...)
@@ -291,17 +345,17 @@ func (s *Store) SpendingExplore(f QueryFilter, groupBy string, topN int, h *mode
 			LEFT JOIN tags tg ON tg.id = tt.tag_id`
 		groupClause = `tg.id, tg.name`
 	default: // category
-		selectKey = `CAST(c.id AS TEXT)`
-		selectLabel = `c.name`
+		selectKey = `CAST(COALESCE(c.id, 0) AS TEXT)`
+		selectLabel = `COALESCE(c.name, '` + UncategorizedLabel + `')`
 		groupClause = `c.id, c.name`
 	}
 
 	q := `SELECT ` + selectKey + ` AS k, ` + selectLabel + ` AS lbl,
 		COALESCE(SUM(s.amount), 0) AS amt, COUNT(DISTINCT t.id) AS cnt
-		FROM transaction_splits s
+		FROM ` + reportLines + ` s
 		JOIN transactions t ON t.id = s.transaction_id
-		JOIN categories c ON c.id = s.category_id` + frag.joins + extraJoin + `
-		WHERE` + frag.where + ` AND c.kind = 'expense'
+		LEFT JOIN categories c ON c.id = s.category_id` + frag.joins + extraJoin + `
+		WHERE` + frag.where + ` AND ` + lineKind + ` = 'expense'
 		GROUP BY ` + groupClause + `
 		ORDER BY amt ASC` // most negative spend first
 
@@ -335,7 +389,18 @@ func (s *Store) SpendingExplore(f QueryFilter, groupBy string, topN int, h *mode
 		return nil, 0, err
 	}
 
+	if groupBy == "category" {
+		colors := s.categoryColors()
+		for i := range raw {
+			raw[i].Color = colors[raw[i].Key]
+		}
+	}
 	sort.Slice(raw, func(i, j int) bool { return raw[i].Amount > raw[j].Amount })
+	if grand > 0 {
+		for i := range raw {
+			raw[i].SharePct = float64(raw[i].Amount) * 100 / float64(grand)
+		}
+	}
 
 	if len(raw) <= topN {
 		return raw, grand, nil
@@ -344,17 +409,41 @@ func (s *Store) SpendingExplore(f QueryFilter, groupBy string, topN int, h *mode
 	out = append(out, raw[:topN]...)
 	var otherAmt int64
 	var otherCnt int
+	var otherPct float64
 	for _, seg := range raw[topN:] {
 		otherAmt += seg.Amount
 		otherCnt += seg.Count
+		otherPct += seg.SharePct
 	}
 	out = append(out, SegmentTotal{
-		Key:    "__other__",
-		Label:  "Other",
-		Amount: otherAmt,
-		Count:  otherCnt,
+		Key:      "__other__",
+		Label:    "Other",
+		Amount:   otherAmt,
+		Count:    otherCnt,
+		SharePct: otherPct,
 	})
 	return out, grand, nil
+}
+
+// UncategorizedSummary counts non-transfer transactions in the filter range that
+// have no category, and their total outflow (positive cents).
+func (s *Store) UncategorizedSummary(f QueryFilter, h *models.Household, now time.Time) (int, int64, error) {
+	f = f.Clone()
+	f.ExcludeTransfers = true
+	f.ExcludeStarting = true
+	f.ResolveDates(h, now)
+	frag, err := s.buildTxFilter(f, true)
+	if err != nil {
+		return 0, 0, err
+	}
+	var n int
+	var spend int64
+	err = s.DB.QueryRow(`SELECT COUNT(1), COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0)
+		FROM transactions t`+frag.joins+`
+		WHERE`+frag.where+` AND t.category_id IS NULL
+		AND NOT EXISTS (SELECT 1 FROM transaction_splits sp WHERE sp.transaction_id = t.id)`,
+		frag.args...).Scan(&n, &spend)
+	return n, spend, err
 }
 
 func exploreDrillQuery(f QueryFilter, groupBy, key, label string) string {
@@ -365,6 +454,9 @@ func exploreDrillQuery(f QueryFilter, groupBy, key, label string) string {
 		id, _ := parseInt64(key)
 		if id > 0 {
 			base.CategoryIDs = []int64{id}
+		} else {
+			review := true
+			base.NeedsReview = &review
 		}
 	case "account":
 		id, _ := parseInt64(key)
@@ -434,17 +526,17 @@ func (s *Store) SegmentPivot(f QueryFilter, groupBy, grain string, h *models.Hou
 			LEFT JOIN tags tg ON tg.id = tt.tag_id`
 		groupExtra = `tg.id, tg.name`
 	default:
-		selectKey = `CAST(c.id AS TEXT)`
-		selectLabel = `c.name`
+		selectKey = `CAST(COALESCE(c.id, 0) AS TEXT)`
+		selectLabel = `COALESCE(c.name, '` + UncategorizedLabel + `')`
 		groupExtra = `c.id, c.name`
 	}
 
 	q := `SELECT ` + selectKey + ` AS rk, ` + selectLabel + ` AS rl, ` + g + ` AS ck,
 		COALESCE(SUM(s.amount), 0) AS amt, COUNT(DISTINCT t.id) AS cnt
-		FROM transaction_splits s
+		FROM ` + reportLines + ` s
 		JOIN transactions t ON t.id = s.transaction_id
-		JOIN categories c ON c.id = s.category_id` + frag.joins + extraJoin + `
-		WHERE` + frag.where + ` AND c.kind = 'expense'
+		LEFT JOIN categories c ON c.id = s.category_id` + frag.joins + extraJoin + `
+		WHERE` + frag.where + ` AND ` + lineKind + ` = 'expense'
 		GROUP BY ` + groupExtra + `, ck`
 
 	rows, err := s.DB.Query(q, frag.args...)
@@ -500,6 +592,9 @@ func (s *Store) SegmentPivot(f QueryFilter, groupBy, grain string, h *models.Hou
 	})
 	for _, rk := range pt.RowKeys {
 		pt.RowLabels = append(pt.RowLabels, rowLabel[rk])
+	}
+	if groupBy == "category" {
+		pt.RowColors = s.categoryColors()
 	}
 	fillPivotColumns(pt, grain, f.DateFrom, f.DateTo, now, h)
 	return pt, nil

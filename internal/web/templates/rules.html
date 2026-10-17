@@ -1,3 +1,53 @@
+{{define "rule-fields"}}
+<div class="rule-form">
+  <div class="field rule-form-wide"><label>When the payee</label>
+    <div class="rule-match-input">
+      <select name="payee_match" aria-label="How to match">
+        <option value="contains">contains</option>
+        <option value="starts_with"{{if and .R (eq .R.PayeeMatch "starts_with")}} selected{{end}}>starts with</option>
+        <option value="equals"{{if and .R (eq .R.PayeeMatch "equals")}} selected{{end}}>is exactly</option>
+      </select>
+      <input name="payee_value" required placeholder="STARBUCKS" spellcheck="false" value="{{with .R}}{{.PayeeValue}}{{end}}">
+    </div>
+  </div>
+  <div class="field"><label>File it as</label>
+    <select name="set_category_id">
+      <option value="">— no category —</option>
+      {{$cur := 0}}{{with .R}}{{$cur = ptrID .SetCategoryID}}{{end}}
+      {{range .Categories}}{{if ne .Kind "starting_balance"}}
+      <option value="{{.ID}}"{{if eq .ID $cur}} selected{{end}}>{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
+      {{end}}{{end}}
+    </select>
+  </div>
+  <div class="field"><label>Who it's for</label>
+    <select name="set_person">
+      <option value="">Keep default</option>
+      <option value="shared"{{if and .R (eq .R.SetPerson "shared")}} selected{{end}}>Shared</option>
+      <option value="a"{{if and .R (eq .R.SetPerson "a")}} selected{{end}}>{{.NameA}}</option>
+      <option value="b"{{if and .R (eq .R.SetPerson "b")}} selected{{end}}>{{.NameB}}</option>
+    </select>
+  </div>
+  <div class="field"><label>Rename payee to</label><input name="rename_payee" placeholder="Starbucks" value="{{with .R}}{{.RenamePayee}}{{end}}"></div>
+  <div class="field"><label>Rule name (optional)</label><input name="name" placeholder="Coffee runs" value="{{with .R}}{{.Name}}{{end}}"></div>
+  <details class="rule-form-wide rule-advanced"{{if and .R (or .R.AccountID .R.AmountMin .R.AmountMax .R.NotesContains .R.SetTags)}} open{{end}}>
+    <summary class="tiny muted">Only some accounts, amounts or notes…</summary>
+    <div class="rule-form">
+      <div class="field"><label>Account</label>
+        <select name="account_id">
+          <option value="">Any account</option>
+          {{$acct := 0}}{{with .R}}{{$acct = ptrID .AccountID}}{{end}}
+          {{range .Accounts}}<option value="{{.ID}}"{{if eq .ID $acct}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field"><label>Notes contain</label><input name="notes_contains" value="{{with .R}}{{.NotesContains}}{{end}}"></div>
+      <div class="field"><label>Amount from</label><input name="amount_min" inputmode="decimal" placeholder="-50.00" value="{{with .R}}{{with .AmountMin}}{{centsInput .}}{{end}}{{end}}"></div>
+      <div class="field"><label>Amount to</label><input name="amount_max" inputmode="decimal" placeholder="0" value="{{with .R}}{{with .AmountMax}}{{centsInput .}}{{end}}{{end}}"></div>
+      <div class="field rule-form-wide"><label>Tags (comma-separated)</label><input name="set_tags" value="{{with .R}}{{.SetTags}}{{end}}"></div>
+    </div>
+  </details>
+</div>
+{{end}}
+
 {{define "rules"}}
 <!DOCTYPE html>
 <html lang="en">
@@ -6,88 +56,80 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Payee rules</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/categorize.js" defer></script>
 </head>
 <body>
-<div class="app-shell wide" style="padding-bottom:2rem">
-  <header class="topbar"><a href="/import">← Import</a></header>
-  <h1>Payee rules</h1>
-  <p class="muted">Ordered; first match wins. Shown in import preview when a rule fires.</p>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "csrf" .}}
+  <h1 style="margin:0">Payee rules</h1>
+  <p class="muted">Imported transactions whose payee matches a rule are filed automatically. Rules are checked top to bottom
+    and the first match wins. Tap a category to change it.</p>
   {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
 
-  <form method="post" action="/rules" class="panel stack" style="margin:1rem 0">
-    {{template "csrf" .}}
-    <h2 style="margin:0">Add rule</h2>
-    <div class="field"><label>Name</label><input name="name" placeholder="Starbucks → Coffee"></div>
-    <div class="field"><label>Payee match</label>
-      <select name="payee_match">
-        <option value="contains">Contains</option>
-        <option value="equals">Equals</option>
-        <option value="starts_with">Starts with</option>
-      </select>
-    </div>
-    <div class="field"><label>Payee value</label><input name="payee_value" required placeholder="STARBUCKS"></div>
-    <div class="field"><label>Notes contains (optional)</label><input name="notes_contains"></div>
-    <div class="field"><label>Account (optional)</label>
-      <select name="account_id">
-        <option value="">Any account</option>
-        {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-      </select>
-    </div>
-    <div class="row">
-      <div class="field" style="flex:1"><label>Amount min</label><input name="amount_min" inputmode="decimal" placeholder="-50.00"></div>
-      <div class="field" style="flex:1"><label>Amount max</label><input name="amount_max" inputmode="decimal" placeholder="0"></div>
-    </div>
-    <div class="field"><label>Set category</label>
-      <select name="set_category_id">
-        <option value="">—</option>
-        {{range .Categories}}
-        {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
-        <option value="{{.ID}}">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
-        {{end}}{{end}}
-      </select>
-    </div>
-    <div class="field"><label>Set person</label>
-      <select name="set_person">
-        <option value="">Keep default</option>
-        <option value="shared">Shared</option>
-        <option value="a">{{.NameA}}</option>
-        <option value="b">{{.NameB}}</option>
-      </select>
-    </div>
-    <div class="field"><label>Rename payee</label><input name="rename_payee" placeholder="Starbucks"></div>
-    <div class="field"><label>Tags (comma-separated)</label><input name="set_tags"></div>
-    <button class="btn btn-primary" type="submit">Add rule</button>
-  </form>
+  <div class="rules-toolbar">
+    <input type="search" class="cat-search" data-rule-search placeholder="Search rules, payees or categories…" value="{{.RuleQuery}}" aria-label="Search rules">
+  </div>
 
-  <div class="panel">
-    {{if not .Rules}}<p class="muted">No rules yet. Unmatched imports land in Needs review.</p>{{end}}
-    {{range .Rules}}
-    <div class="list-row" style="align-items:flex-start">
-      <div>
-        <div style="font-weight:600">{{.SortOrder}}. {{.Name}}</div>
-        <div class="tiny muted">
-          payee {{.PayeeMatch}} “{{.PayeeValue}}”
-          {{if .SetCategoryName}} → {{.SetCategoryName}}{{end}}
-          {{if .SetPerson}} · person {{.SetPerson}}{{end}}
-          {{if .RenamePayee}} · rename {{.RenamePayee}}{{end}}
+  <details class="panel rule-add"{{if .Error}} open{{end}}>
+    <summary><b>+ Add a rule</b></summary>
+    <form method="post" action="/rules" class="stack" style="margin-top:.8rem">
+      {{template "csrf" .}}
+      {{template "rule-fields" (dict "Categories" .Categories "Accounts" .Accounts "NameA" .NameA "NameB" .NameB)}}
+      <div><button class="btn btn-primary" type="submit">Add rule</button></div>
+    </form>
+  </details>
+
+  <div class="panel rules-list">
+    {{if not .RuleViews}}
+    <p class="muted" style="margin:0">No rules yet. Categorize payees in <a href="/review">Review</a> with “Remember for future imports” on,
+      or add one above.</p>
+    {{end}}
+    <p class="muted rules-none" data-rule-none hidden style="margin:0">No rules match your search.</p>
+    {{range .RuleViews}}
+    <div class="rule-row{{if not .Enabled}} is-off{{end}}" id="rule-{{.ID}}" data-rule-row="{{.ID}}" data-rule="{{.FormJSON}}"
+      data-search="{{lower .PayeeValue}} {{lower .Name}} {{lower .SetCategoryName}} {{lower .RenamePayee}}">
+      <div class="rule-main">
+        <div class="rule-when">
+          <span class="tiny muted">{{if eq .PayeeMatch "equals"}}is exactly{{else if eq .PayeeMatch "starts_with"}}starts with{{else}}contains{{end}}</span>
+          <code class="rule-value">{{.PayeeValue}}</code>
+          <span class="faint">→</span>
+          {{template "cat-chip" (dict "Target" "rule" "IDs" .ID "Payee" .PayeeValue "Amount" 0 "Account" "" "Current" (ptrID .SetCategoryID) "Name" .SetCategoryName "Person" "" "Key" .PayeeValue "Title" (print "Rule: payee " .PayeeValue) "Label" (or .SetCategoryName "Choose category"))}}
         </div>
+        {{if .CustomName}}<div class="small" style="font-weight:600">{{.Name}}</div>{{end}}
+        <div class="tiny muted" data-rule-stats>
+          {{if not .Enabled}}Off, so imports skip it{{else if .Matches}}Matches {{.Matches}} saved transaction{{if ne .Matches 1}}s{{end}}{{else}}No saved transactions match yet{{end}}{{if .SetPerson}} · for {{personLabel .SetPerson $.NameA $.NameB}}{{end}}{{if .RenamePayee}} · renames to “{{.RenamePayee}}”{{end}}{{$aid := ptrID .AccountID}}{{if $aid}}{{range $.Accounts}}{{if eq .ID $aid}} · only {{.Name}}{{end}}{{end}}{{end}}{{if .AmountMin}} · from {{money (ptrID .AmountMin) $.Currency}}{{end}}{{if .AmountMax}} · up to {{money (ptrID .AmountMax) $.Currency}}{{end}}{{if .NotesContains}} · notes contain “{{.NotesContains}}”{{end}}
+        </div>
+        <button type="button" class="btn btn-sm rule-apply" data-rule-apply="{{.ID}}"{{if not (and .Enabled .Misfiled .SetCategoryID)}} hidden{{end}}>
+          <span>Re-file <span data-rule-misfiled>{{.Misfiled}}</span> saved transaction<span data-rule-s{{if eq .Misfiled 1}} hidden{{end}}>s</span> as <span data-rule-cat>{{.SetCategoryName}}</span></span></button>
       </div>
-      <div class="row">
+      <div class="rule-actions">
+        <label class="check rule-toggle" title="Turn this rule on or off"><input type="checkbox" data-rule-toggle="{{.ID}}"{{if .Enabled}} checked{{end}}> On</label>
         <form method="post" action="/rules/{{.ID}}/move">{{template "csrf" $}}
           <input type="hidden" name="dir" value="up">
-          <button class="btn btn-sm btn-ghost" type="submit">↑</button>
+          <button class="btn btn-sm btn-ghost" type="submit" title="Check this rule earlier" aria-label="Move up">↑</button>
         </form>
         <form method="post" action="/rules/{{.ID}}/move">{{template "csrf" $}}
           <input type="hidden" name="dir" value="down">
-          <button class="btn btn-sm btn-ghost" type="submit">↓</button>
+          <button class="btn btn-sm btn-ghost" type="submit" title="Check this rule later" aria-label="Move down">↓</button>
         </form>
-        <form method="post" action="/rules/{{.ID}}/delete">{{template "csrf" $}}
-          <button class="btn btn-sm btn-ghost" type="submit">Delete</button>
-        </form>
+        <button type="button" class="btn btn-sm btn-ghost" data-rule-edit="{{.ID}}">Edit</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-rule-delete="{{.ID}}">Delete</button>
       </div>
     </div>
     {{end}}
   </div>
+  <template id="rule-form-tpl">
+    <form method="post" class="rule-edit stack">
+      {{template "csrf" .}}
+      {{template "rule-fields" (dict "Categories" .Categories "Accounts" .Accounts "NameA" .NameA "NameB" .NameB)}}
+      <div class="row">
+        <button class="btn btn-primary btn-sm" type="submit">Save rule</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-rule-cancel>Cancel</button>
+      </div>
+    </form>
+  </template>
 </div>
 </body>
 </html>
@@ -134,70 +176,72 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Needs review</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/categorize.js" defer></script>
+  <script src="/static/js/tags.js" defer></script>
 </head>
 <body>
 <div class="app-shell">
   {{template "nav" .}}
   {{template "topbar" .}}
+  {{template "csrf" .}}
   <div class="spread">
     <h1 style="margin:0">Needs review</h1>
-    <span class="chip chip-warn">{{.ReviewCount}}</span>
+    <span class="chip chip-warn" data-review-count>{{.ReviewCount}}</span>
   </div>
-  <p class="muted">Imported and uncategorized rows stay here until you confirm.</p>
+  <p class="muted">Grouped by merchant, so one tap categorizes the whole group and teaches future imports.
+    Tap any category to change a single transaction. Picked the wrong one? Use <b>Change</b> or <b>Undo</b> on the finished group,
+    or adjust it later in <a href="/rules">Payee rules</a>.</p>
 
-  {{if not .Transactions}}
+  {{if not .ReviewGroups}}
   <div class="empty"><h2>Queue clear</h2><p>Nothing waiting for review.</p></div>
   {{else}}
-  <form method="post" action="/review/confirm-bulk" class="panel" style="margin-top:1rem">
-    {{template "csrf" .}}
-    <div class="spread" style="margin-bottom:.75rem">
-      <span class="tiny muted">Select rows, then confirm</span>
-      <button class="btn btn-sm btn-primary" type="submit">Confirm selected</button>
-    </div>
-    {{range .Transactions}}
-    <article class="tx-card">
-      <div style="display:flex;gap:.5rem">
-        <input type="checkbox" name="tx_id" value="{{.ID}}" checked style="margin-top:.35rem">
-        <div>
-          <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
-          <div class="tx-meta">{{.TransactionDate}} · {{.AccountName}}{{if .CategoryName}} · {{.CategoryName}}{{else}} · <span class="chip chip-warn">Uncategorized</span>{{end}}</div>
+  <div class="stack" style="margin-top:1rem">
+    {{range .ReviewGroups}}
+    {{$g := .}}
+    {{$first := index .Items 0}}
+    {{$n := len .Items}}
+    <section class="panel review-group" data-done-ids="{{.IDs}}" data-key="{{.Key}}" data-title="{{if .Key}}{{.Key}}{{else}}(no payee){{end}}"
+      data-payee="{{$first.PayeeName}}" data-amount="{{.Total}}" data-account="{{$first.AccountID}}">
+      <div class="spread" style="align-items:flex-start">
+        <div style="min-width:0">
+          <div class="tx-payee rg-title">{{if .Key}}{{.Key}}{{else}}(no payee){{end}}</div>
+          <div class="tx-meta">
+            {{if gt $n 1}}{{$n}} transactions{{else}}{{$first.TransactionDate}} · {{$first.AccountName}}{{if ne $first.PayeeName .Key}} · {{$first.PayeeName}}{{end}}{{end}}
+            {{if .CategoryName}} · currently {{.CategoryName}}{{end}}
+          </div>
+          {{if eq $n 1}}{{template "tag-chips" $first}}{{end}}
         </div>
+        <div class="tx-amount {{if lt .Total 0}}neg{{else}}pos{{end}}">{{money .Total $.Currency}}</div>
       </div>
-      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
-    </article>
+      <div class="done-note" data-done-note></div>
+      <div class="rg-actions">
+        {{range .Suggest}}
+        <button type="button" class="chip chip-lg chip-suggest" data-cat-quick data-target="tx" data-ids="{{$g.IDs}}"
+          data-category="{{.ID}}" data-key="{{$g.Key}}" data-remember="1">✓ {{.Name}}</button>
+        {{end}}
+        {{template "cat-chip" (dict "Target" "tx" "IDs" .IDs "Payee" $first.PayeeName "Amount" .Total "Account" $first.AccountID "Current" (ptrID .CategoryID) "Name" .CategoryName "Person" "" "Key" .Key "Remember" true "Label" (print (or (and .Suggest "Something else…") "Choose category…")) "Class" "chip-lg" "Title" (print (or .Key "(no payee)")))}}
+        <button type="button" class="btn btn-sm btn-ghost" data-review-skip data-ids="{{.IDs}}" title="Leave uncategorized and take out of the queue">Mark reviewed</button>
+      </div>
+      {{if gt $n 1}}
+      <details class="rg-items">
+        <summary class="tiny muted">Show {{$n}} transactions</summary>
+        {{range .Items}}
+        <div class="tx-card" data-tx-row="{{.ID}}">
+          <div style="min-width:0">
+            <div class="small tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+            <div class="tx-meta">{{.TransactionDate}} · {{.AccountName}} ·
+              {{template "cat-chip" (dict "Target" "tx" "IDs" .ID "Payee" .PayeeName "Amount" .Amount "Account" .AccountID "Current" (ptrID .CategoryID) "Name" .CategoryName "Person" .Person "Remember" false)}}
+            </div>
+            {{template "tag-chips" .}}
+          </div>
+          <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+        </div>
+        {{end}}
+      </details>
+      {{end}}
+    </section>
     {{end}}
-  </form>
-
-  <h2 style="margin-top:1.5rem">One at a time</h2>
-  {{range .Transactions}}
-  <form method="post" action="/review/{{.ID}}/confirm" class="panel stack" style="margin-top:.75rem">
-    {{template "csrf" $}}
-    <div class="spread">
-      <strong>{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</strong>
-      <span class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</span>
-    </div>
-    <div class="tiny muted">{{.TransactionDate}} · {{.AccountName}}</div>
-    <div class="field"><label>Payee</label><input name="payee" value="{{.PayeeName}}"></div>
-    <div class="field"><label>Category</label>
-      <select name="category_id">
-        <option value="">Keep current</option>
-        {{range $.Categories}}
-        {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
-        <option value="{{.ID}}">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
-        {{end}}{{end}}
-      </select>
-    </div>
-    <div class="field"><label>Person</label>
-      <select name="person">
-        <option value="shared" {{if eq .Person "shared"}}selected{{end}}>Shared</option>
-        <option value="a" {{if eq .Person "a"}}selected{{end}}>{{$.NameA}}</option>
-        <option value="b" {{if eq .Person "b"}}selected{{end}}>{{$.NameB}}</option>
-      </select>
-    </div>
-    <div class="field"><label>Notes</label><input name="notes" value="{{.Notes}}"></div>
-    <button class="btn btn-primary" type="submit">Confirm</button>
-  </form>
-  {{end}}
+  </div>
   {{end}}
 </div>
 </body>

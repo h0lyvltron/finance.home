@@ -284,6 +284,37 @@ func (s *Store) Undo(undoID string) error {
 		}
 		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
 		return tx.Commit()
+	case "recategorize":
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := undoRecategorize(tx, payload); err != nil {
+			return err
+		}
+		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
+		return tx.Commit()
+	case "rule_delete", "category_archive", "category_merge", "tag_change", "tag_merge", "tag_archive", "tag_delete":
+		undoFn := map[string]func(*sql.Tx, string) error{
+			"rule_delete":      undoRuleDelete,
+			"category_archive": undoCategoryArchive,
+			"category_merge":   undoCategoryMerge,
+			"tag_change":       undoTagChange,
+			"tag_merge":        undoTagMerge,
+			"tag_archive":      undoTagArchive,
+			"tag_delete":       undoTagDelete,
+		}[kind]
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := undoFn(tx, payload); err != nil {
+			return err
+		}
+		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
+		return tx.Commit()
 	default:
 		return fmt.Errorf("unknown undo kind")
 	}

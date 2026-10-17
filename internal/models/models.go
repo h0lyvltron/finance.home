@@ -93,6 +93,13 @@ type Transaction struct {
 	Tags            []Tag
 	RunningBalance  int64
 	DeletedAt       string
+	Suggest         []CategoryRef
+}
+
+// CategoryRef is a category offered as a one-tap suggestion.
+type CategoryRef struct {
+	ID   int64
+	Name string
 }
 
 type UndoOp struct {
@@ -175,6 +182,7 @@ type StagingRow struct {
 	DuplicateTxID    *int64
 	DuplicateSummary string
 	NeedsReview      bool
+	Suggest          []CategoryRef
 }
 
 type ReviewItem struct {
@@ -392,13 +400,17 @@ type DashboardLayout struct {
 	UpdatedAt   string
 }
 
-// DashboardWidget is one row in a personal dashboard list.
+// DashboardWidget is one tile on a personal dashboard cell grid.
 type DashboardWidget struct {
 	ID         int64
 	LayoutID   int64
 	WidgetType string
-	Width      string // s | m | l
-	SortOrder  int
+	Width      string // s | m | l (initial size hint; grid span is authoritative)
+	SortOrder  int    // reading order (row, then column)
+	GridCol    int    // 1-based column on the 12-column grid
+	GridRow    int    // 1-based row
+	GridW      int    // column span
+	GridH      int    // row span
 	ConfigJSON string
 	CreatedAt  string
 	Label      string // display label (not persisted)

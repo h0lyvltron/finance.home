@@ -59,8 +59,9 @@ func DetectHeaders(r io.Reader, delim rune, hasHeader bool) ([]string, [][]strin
 	var headers []string
 	var rows [][]string
 	if hasHeader {
-		headers = normalizeHeaders(all[0])
-		rows = all[1:]
+		start := headerRowIndex(all)
+		headers = normalizeHeaders(all[start])
+		rows = all[start+1:]
 	} else {
 		n := len(all[0])
 		headers = make([]string, n)
@@ -72,11 +73,45 @@ func DetectHeaders(r io.Reader, delim rune, hasHeader bool) ([]string, [][]strin
 	return headers, rows, nil
 }
 
+// headerRowIndex skips bank preamble lines (account number, balance, ...) that
+// some exports put above the real header row.
+func headerRowIndex(all [][]string) int {
+	widest := 0
+	for _, r := range all {
+		if n := nonEmptyCount(r); n > widest {
+			widest = n
+		}
+	}
+	if widest <= 1 {
+		return 0
+	}
+	need := widest
+	if widest > 3 {
+		need-- // tolerate one unnamed header column
+	}
+	for i, r := range all {
+		if nonEmptyCount(r) >= need {
+			return i
+		}
+	}
+	return 0
+}
+
+func nonEmptyCount(r []string) int {
+	n := 0
+	for _, s := range r {
+		if strings.TrimSpace(s) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 func normalizeHeaders(h []string) []string {
 	out := make([]string, len(h))
 	seen := map[string]int{}
 	for i, s := range h {
-		s = strings.TrimSpace(s)
+		s = strings.TrimSpace(strings.TrimPrefix(s, "\ufeff"))
 		if s == "" {
 			s = fmt.Sprintf("col_%d", i+1)
 		}
@@ -94,21 +129,27 @@ func normalizeHeaders(h []string) []string {
 
 func ParseRows(headers []string, rows [][]string, p Profile) []ParsedRow {
 	out := make([]ParsedRow, 0, len(rows))
+	payeeIdx := -1
+	for j, h := range headers {
+		if p.PayeeColumn != "" && h == p.PayeeColumn {
+			payeeIdx = j
+		}
+	}
+	trailing := trailingDelimiter(rows, len(headers))
 	for i, cols := range rows {
+		cols = fitColumns(cols, len(headers), payeeIdx, p.Delimiter, trailing)
 		raw := map[string]string{}
 		for j, h := range headers {
 			if j < len(cols) {
-				raw[h] = strings.TrimSpace(cols[j])
+				raw[h] = cleanCell(cols[j])
 			} else {
 				raw[h] = ""
 			}
 		}
-		pr := ParsedRow{Index: i, Raw: raw}
 		if isBlankRow(raw) {
-			pr.Error = "blank row"
-			out = append(out, pr)
 			continue
 		}
+		pr := ParsedRow{Index: i, Raw: raw}
 		dateRaw := raw[p.DateColumn]
 		date, err := ParseDate(dateRaw, p.DateFormat)
 		if err != nil {
@@ -137,6 +178,83 @@ func ParseRows(headers []string, rows [][]string, p Profile) []ParsedRow {
 		out = append(out, pr)
 	}
 	return out
+}
+
+// trailingDelimiter reports files whose data rows (unlike the header) end in a
+// stray delimiter: most rows are one cell too long and that cell is empty.
+func trailingDelimiter(rows [][]string, n int) bool {
+	total, over := 0, 0
+	for _, cols := range rows {
+		if nonEmptyCount(cols) == 0 {
+			continue
+		}
+		total++
+		if len(cols) > n {
+			if strings.TrimSpace(cols[len(cols)-1]) != "" {
+				return false
+			}
+			over++
+		}
+	}
+	return over > 0 && over*2 >= total
+}
+
+// fitColumns handles rows with more cells than headers: a stray trailing
+// delimiter is dropped, otherwise (unquoted delimiter inside a description)
+// the overflow is folded back into the payee column.
+func fitColumns(cols []string, n, payeeIdx int, delim rune, trailing bool) []string {
+	if trailing && len(cols) > n && strings.TrimSpace(cols[len(cols)-1]) == "" {
+		cols = cols[:len(cols)-1]
+	}
+	extra := len(cols) - n
+	if extra <= 0 || payeeIdx < 0 {
+		return cols
+	}
+	sep := string(delim)
+	if delim == 0 || delim == ',' {
+		sep = ", "
+	}
+	parts := make([]string, 0, extra+1)
+	for _, c := range cols[payeeIdx : payeeIdx+extra+1] {
+		parts = append(parts, strings.TrimSpace(c))
+	}
+	out := make([]string, 0, n)
+	out = append(out, cols[:payeeIdx]...)
+	out = append(out, strings.Join(parts, sep))
+	return append(out, cols[payeeIdx+extra+1:]...)
+}
+
+// cleanCell unwraps Excel text-forcing cells like ="7091".
+func cleanCell(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 3 && strings.HasPrefix(s, `="`) && strings.HasSuffix(s, `"`) {
+		return s[2 : len(s)-1]
+	}
+	return s
+}
+
+// MissingColumns lists mapped columns that don't exist in headers.
+func MissingColumns(headers []string, p Profile) []string {
+	have := map[string]bool{}
+	for _, h := range headers {
+		have[h] = true
+	}
+	var missing []string
+	check := func(c string) {
+		if c != "" && !have[c] {
+			missing = append(missing, c)
+		}
+	}
+	check(p.DateColumn)
+	if p.AmountMode == "debit_credit" {
+		check(p.DebitColumn)
+		check(p.CreditColumn)
+	} else {
+		check(p.AmountColumn)
+	}
+	check(p.PayeeColumn)
+	check(p.NotesColumn)
+	return missing
 }
 
 func isBlankRow(raw map[string]string) bool {
@@ -193,14 +311,18 @@ func ParseDate(s, format string) (string, error) {
 	if s == "" {
 		return "", fmt.Errorf("empty")
 	}
-	// Excel serial? skip
 	formats := dateFormats(format)
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t.Format("2006-01-02"), nil
+	cands := []string{s}
+	if i := strings.IndexAny(s, " T"); i > 0 {
+		cands = append(cands, s[:i]) // trailing time of day, e.g. "2026-10-12 00:00:00"
+	}
+	for _, c := range cands {
+		for _, f := range formats {
+			if t, err := time.Parse(f, c); err == nil {
+				return t.Format("2006-01-02"), nil
+			}
 		}
 	}
-	// Try common variants with single-digit month/day already covered by Go layouts.
 	return "", fmt.Errorf("unrecognized %q", s)
 }
 
@@ -209,9 +331,9 @@ func dateFormats(format string) []string {
 	case "yyyy-mm-dd":
 		return []string{"2006-01-02"}
 	case "mm/dd/yyyy", "mdy_slash":
-		return []string{"01/02/2006", "1/2/2006", "01/2/2006", "1/02/2006"}
+		return []string{"01/02/2006", "1/2/2006", "01/2/2006", "1/02/2006", "01/02/06", "1/2/06"}
 	case "dd/mm/yyyy", "dmy_slash":
-		return []string{"02/01/2006", "2/1/2006", "02/1/2006", "2/01/2006"}
+		return []string{"02/01/2006", "2/1/2006", "02/1/2006", "2/01/2006", "02/01/06", "2/1/06"}
 	case "mm-dd-yyyy":
 		return []string{"01-02-2006", "1-2-2006"}
 	case "dd-mm-yyyy":
@@ -222,6 +344,7 @@ func dateFormats(format string) []string {
 			"01/02/2006", "1/2/2006", "01/2/2006", "1/02/2006",
 			"02/01/2006", "2/1/2006",
 			"01-02-2006", "02-01-2006",
+			"01/02/06", "1/2/06",
 			"Jan 2, 2006", "January 2, 2006",
 			"2 Jan 2006", "02 Jan 2006",
 			"2006/01/02",
@@ -245,30 +368,43 @@ func GuessColumns(headers []string) Profile {
 		HasHeader:  true,
 		Delimiter:  ',',
 	}
-	lower := map[string]string{}
-	for _, h := range headers {
-		lower[strings.ToLower(h)] = h
-	}
-	pick := func(cands ...string) string {
+	pickWhere := func(skip func(string) bool, cands ...string) string {
 		for _, c := range cands {
-			if h, ok := lower[c]; ok {
-				return h
+			for _, h := range headers {
+				if l := strings.ToLower(h); l == c && !skip(l) {
+					return h
+				}
 			}
-			for k, h := range lower {
-				if strings.Contains(k, c) {
+			for _, h := range headers {
+				if l := strings.ToLower(h); strings.Contains(l, c) && !skip(l) {
 					return h
 				}
 			}
 		}
 		return ""
 	}
-	p.DateColumn = pick("date", "posted", "transaction date", "trans date", "posting date")
+	pick := func(cands ...string) string {
+		return pickWhere(func(string) bool { return false }, cands...)
+	}
+	// Card numbers, debit/credit indicator and balance columns aren't amounts.
+	notMoney := func(l string) bool {
+		for _, s := range []string{"card", "type", "indicator", "balance", "/"} {
+			if strings.Contains(l, s) {
+				return true
+			}
+		}
+		return false
+	}
+	p.DateColumn = pick("transaction date", "trans. date", "trans date", "posting date", "posted date", "post date", "date", "posted")
 	p.PayeeColumn = pick("payee", "description", "memo", "name", "merchant")
 	p.NotesColumn = pick("notes", "memo", "reference", "check")
-	debit := pick("debit", "withdrawal", "outflow", "amount debit")
-	credit := pick("credit", "deposit", "inflow", "amount credit")
-	amount := pick("amount", "sum", "value", "transaction amount")
-	if debit != "" && credit != "" {
+	if p.NotesColumn == p.PayeeColumn {
+		p.NotesColumn = ""
+	}
+	debit := pickWhere(notMoney, "debit", "withdrawal", "outflow", "money out", "paid out")
+	credit := pickWhere(notMoney, "credit", "deposit", "inflow", "money in", "paid in")
+	amount := pickWhere(notMoney, "amount", "transaction amount", "sum", "value")
+	if debit != "" && credit != "" && debit != credit {
 		p.AmountMode = "debit_credit"
 		p.DebitColumn = debit
 		p.CreditColumn = credit
@@ -288,23 +424,23 @@ func GuessColumns(headers []string) Profile {
 	return p
 }
 
-// DetectDelimiter peeks at the first line.
+// DetectDelimiter picks the delimiter with the most occurrences on any of the
+// first lines (preamble lines may contain none); ties and no-hits fall back to comma.
 func DetectDelimiter(sample string) rune {
-	line := sample
-	if i := strings.IndexByte(sample, '\n'); i >= 0 {
-		line = sample[:i]
+	lines := strings.SplitN(sample, "\n", 21)
+	if len(lines) > 20 {
+		lines = lines[:20]
 	}
-	counts := map[rune]int{',': 0, ';': 0, '\t': 0, '|': 0}
-	for _, r := range line {
-		if _, ok := counts[r]; ok {
-			counts[r]++
+	best, bestN := ',', 0
+	for _, d := range []string{",", ";", "\t", "|"} {
+		n := 0
+		for _, l := range lines {
+			if c := strings.Count(l, d); c > n {
+				n = c
+			}
 		}
-	}
-	best := ','
-	bestN := -1
-	for r, n := range counts {
 		if n > bestN {
-			best, bestN = r, n
+			best, bestN = []rune(d)[0], n
 		}
 	}
 	return best

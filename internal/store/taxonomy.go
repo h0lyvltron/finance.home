@@ -240,5 +240,6 @@ func (s *Store) CreatePayee(name string) (int64, error) {
 }
 
 func (s *Store) CreateTag(name string) (int64, error) {
-	return s.EnsureTag(name)
+	t, _, err := s.EnsureActiveTag(name)
+	return t.ID, err
 }

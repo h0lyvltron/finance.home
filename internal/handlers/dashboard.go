@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -54,37 +55,25 @@ func (a *App) dashboardRemoveWidget(w http.ResponseWriter, r *http.Request, sess
 	http.Redirect(w, r, dashboardReturn(r), http.StatusSeeOther)
 }
 
-func (a *App) dashboardMoveWidget(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	_ = r.ParseForm()
-	_ = a.Store.MoveWidget(sess.PersonID, id, r.FormValue("dir"))
-	http.Redirect(w, r, dashboardReturn(r), http.StatusSeeOther)
+type widgetCell struct {
+	ID  int64 `json:"id"`
+	Col int   `json:"col"`
+	Row int   `json:"row"`
+	W   int   `json:"w"`
+	H   int   `json:"h"`
 }
 
-func (a *App) dashboardReorderWidgets(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
+// dashboardPlaceWidget moves/resizes a widget on the cell grid; fetch callers get
+// every widget's resolved cells back since others may have been pushed down.
+func (a *App) dashboardPlaceWidget(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	_ = r.ParseForm()
+	num := func(k string) int {
+		n, _ := strconv.Atoi(strings.TrimSpace(r.FormValue(k)))
+		return n
 	}
-	parts := strings.Split(r.FormValue("order"), ",")
-	ids := make([]int64, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		id, err := strconv.ParseInt(part, 10, 64)
-		if err != nil || id <= 0 {
-			if wantsFetch(r) {
-				http.Error(w, "invalid widget order", http.StatusBadRequest)
-				return
-			}
-			http.Redirect(w, r, "/?edit=1&err="+urlQueryEscape("invalid widget order"), http.StatusSeeOther)
-			return
-		}
-		ids = append(ids, id)
-	}
-	if err := a.Store.ReorderWidgets(sess.PersonID, ids); err != nil {
+	widgets, err := a.Store.PlaceWidget(sess.PersonID, id, num("col"), num("row"), num("w"), num("h"))
+	if err != nil {
 		if wantsFetch(r) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -92,8 +81,29 @@ func (a *App) dashboardReorderWidgets(w http.ResponseWriter, r *http.Request, se
 		http.Redirect(w, r, "/?edit=1&err="+urlQueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	if wantsFetch(r) {
-		w.WriteHeader(http.StatusNoContent)
+	if !wantsFetch(r) {
+		http.Redirect(w, r, "/?edit=1", http.StatusSeeOther)
+		return
+	}
+	cells := make([]widgetCell, 0, len(widgets))
+	for _, x := range widgets {
+		cells = append(cells, widgetCell{ID: x.ID, Col: x.GridCol, Row: x.GridRow, W: x.GridW, H: x.GridH})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"widgets": cells})
+}
+
+func (a *App) dashboardCompact(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	if err := a.Store.CompactDashboard(sess.PersonID); err != nil {
+		http.Redirect(w, r, "/?edit=1&err="+urlQueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/?edit=1", http.StatusSeeOther)
+}
+
+func (a *App) dashboardReset(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	if err := a.Store.ResetDashboard(sess.PersonID); err != nil {
+		http.Redirect(w, r, "/?edit=1&err="+urlQueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/?edit=1", http.StatusSeeOther)
@@ -101,13 +111,6 @@ func (a *App) dashboardReorderWidgets(w http.ResponseWriter, r *http.Request, se
 
 func wantsFetch(r *http.Request) bool {
 	return r.Header.Get("X-Requested-With") == "fetch"
-}
-
-func (a *App) dashboardSetWidth(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	_ = r.ParseForm()
-	_ = a.Store.SetWidgetWidth(sess.PersonID, id, r.FormValue("width"))
-	http.Redirect(w, r, dashboardReturn(r), http.StatusSeeOther)
 }
 
 // chartJS wraps widget chart JSON for safe template embedding.

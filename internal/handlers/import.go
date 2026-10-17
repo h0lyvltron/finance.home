@@ -19,6 +19,12 @@ func (a *App) importHome(w http.ResponseWriter, r *http.Request, sess *auth.Sess
 	d.Batches = batches
 	profiles, _ := a.Store.ListMappingProfiles()
 	d.Profiles = profiles
+	switch {
+	case r.URL.Query().Get("undone") != "":
+		d.Flash = "undone"
+	case r.URL.Query().Get("cancelled") != "":
+		d.Flash = "cancelled"
+	}
 	a.Render.RenderHTTP(w, "import-home", d)
 }
 
@@ -59,6 +65,10 @@ func (a *App) importUpload(w http.ResponseWriter, r *http.Request, sess *auth.Se
 
 func (a *App) importMapGet(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	a.renderImportMap(w, r, sess, id, "")
+}
+
+func (a *App) renderImportMap(w http.ResponseWriter, r *http.Request, sess *auth.Session, id int64, errMsg string) {
 	b, err := a.Store.GetImportBatch(id)
 	if err != nil {
 		http.NotFound(w, r)
@@ -67,13 +77,35 @@ func (a *App) importMapGet(w http.ResponseWriter, r *http.Request, sess *auth.Se
 	d := a.base(r, sess)
 	d.Nav = "more"
 	a.withQuickAdd(&d)
+	d.Error = errMsg
 	d.Batch = b
 	profiles, _ := a.Store.ListMappingProfiles()
 	d.Profiles = profiles
-	guess := importcsv.GuessColumns(b.Headers)
-	d.Guess = guess
+	if headers, err := a.Store.BatchHeaders(id); err == nil {
+		b.Headers = headers
+	}
 	d.Headers = b.Headers
+	g := importGuess{Profile: importcsv.GuessColumns(b.Headers)}
+	if mp := store.MatchingProfile(profiles, b.Headers); mp != nil {
+		g.ProfileID, g.ProfileName = mp.ID, mp.Name
+		if mp.AccountID != nil {
+			g.AccountID = *mp.AccountID
+		}
+	}
+	if b.AccountID != nil {
+		g.AccountID = *b.AccountID
+	}
+	d.Guess = g
 	a.Render.RenderHTTP(w, "import-map", d)
+}
+
+// importGuess is the map form's starting point: column guesses from the
+// header names plus a saved profile that fits this file, if any.
+type importGuess struct {
+	importcsv.Profile
+	ProfileID   int64
+	ProfileName string
+	AccountID   int64
 }
 
 func (a *App) importMapPost(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
@@ -81,12 +113,7 @@ func (a *App) importMapPost(w http.ResponseWriter, r *http.Request, sess *auth.S
 	_ = r.ParseForm()
 	acctID, _ := strconv.ParseInt(r.FormValue("account_id"), 10, 64)
 	if acctID == 0 {
-		d := a.base(r, sess)
-		d.Error = "Account is required."
-		b, _ := a.Store.GetImportBatch(id)
-		d.Batch = b
-		a.withQuickAdd(&d)
-		a.Render.RenderHTTP(w, "import-map", d)
+		a.renderImportMap(w, r, sess, id, "Account is required.")
 		return
 	}
 	profileID, _ := strconv.ParseInt(r.FormValue("profile_id"), 10, 64)
@@ -119,21 +146,17 @@ func (a *App) importMapPost(w http.ResponseWriter, r *http.Request, sess *auth.S
 		if in.Profile.Delimiter == "" {
 			in.Profile.Delimiter = ","
 		}
+		if in.Profile.AmountMode == "debit_credit" {
+			in.Profile.AmountColumn = ""
+		} else {
+			in.Profile.DebitColumn, in.Profile.CreditColumn = "", ""
+		}
 		if in.Profile.Name == "" {
 			in.Profile.Name = "CSV profile"
 		}
 	}
 	if err := a.Store.MapAndStage(in); err != nil {
-		d := a.base(r, sess)
-		d.Error = err.Error()
-		b, _ := a.Store.GetImportBatch(id)
-		d.Batch = b
-		a.withQuickAdd(&d)
-		profiles, _ := a.Store.ListMappingProfiles()
-		d.Profiles = profiles
-		d.Headers = b.Headers
-		d.Guess = importcsv.GuessColumns(b.Headers)
-		a.Render.RenderHTTP(w, "import-map", d)
+		a.renderImportMap(w, r, sess, id, err.Error())
 		return
 	}
 	http.Redirect(w, r, fmt.Sprintf("/import/%d/preview", id), http.StatusSeeOther)
@@ -175,6 +198,7 @@ func (a *App) importPreview(w http.ResponseWriter, r *http.Request, sess *auth.S
 		pages++
 	}
 	d.TotalPages = pages
+	d.ErrorCount, d.FirstError, _ = a.Store.StagingErrorSummary(id)
 	if drawer := r.URL.Query().Get("row"); drawer != "" {
 		rid, _ := strconv.ParseInt(drawer, 10, 64)
 		if row, err := a.Store.GetStagingRow(rid); err == nil {
@@ -266,6 +290,15 @@ func (a *App) importUndo(w http.ResponseWriter, r *http.Request, sess *auth.Sess
 		return
 	}
 	http.Redirect(w, r, "/import?undone=1", http.StatusSeeOther)
+}
+
+func (a *App) importCancel(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	batchID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err := a.Store.CancelImportBatch(batchID); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	http.Redirect(w, r, "/import?cancelled=1", http.StatusSeeOther)
 }
 
 func (a *App) exportCSV(w http.ResponseWriter, r *http.Request, sess *auth.Session) {

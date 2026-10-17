@@ -14,6 +14,9 @@ func TestParseDecimal(t *testing.T) {
 		{"12.3", 1230},
 		{"0.05", 5},
 		{"1,234.56", 123456},
+		{"-$12.34", -1234},
+		{"$-12.34", -1234},
+		{"($1,234.56)", -123456},
 	}
 	for _, c := range cases {
 		got, err := ParseDecimal(c.in)

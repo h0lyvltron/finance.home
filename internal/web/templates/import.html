@@ -16,6 +16,7 @@
   <p class="muted">Map a bank file, preview with rules and matches, then commit. Desktop-first wizard.</p>
   {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
   {{if eq (printf "%s" .Flash) "undone"}}<div class="alert alert-ok">Import batch undone.</div>{{end}}
+  {{if eq (printf "%s" .Flash) "cancelled"}}<div class="alert alert-ok">Import cancelled. Nothing was added.</div>{{end}}
 
   <form method="post" action="/import/upload" enctype="multipart/form-data" class="panel stack" style="margin:1rem 0">
     {{template "csrf" .}}
@@ -47,6 +48,11 @@
       <div class="row">
         {{if eq .Status "uploaded"}}<a class="btn btn-sm btn-ghost" href="/import/{{.ID}}/map">Map</a>{{end}}
         {{if eq .Status "mapped"}}<a class="btn btn-sm btn-ghost" href="/import/{{.ID}}/preview">Preview</a>{{end}}
+        {{if or (eq .Status "uploaded") (eq .Status "mapped")}}
+        <form method="post" action="/import/{{.ID}}/cancel" onsubmit="return confirm('Discard this import? Nothing has been committed yet.')">{{template "csrf" $}}
+          <button class="btn btn-sm btn-ghost" type="submit">Cancel</button>
+        </form>
+        {{end}}
         {{if eq .Status "committed"}}
         <a class="btn btn-sm btn-ghost" href="/import/{{.ID}}/done">Done</a>
         <form method="post" action="/import/{{.ID}}/undo">{{template "csrf" $}}
@@ -73,7 +79,7 @@
   <script type="module" src="/static/vendor/datastar.js"></script>
 </head>
 <body>
-<div class="app-shell wide" data-signals="{amountMode: '{{if .Guess}}{{.Guess.AmountMode}}{{else}}signed{{end}}', useProfile: false}">
+<div class="app-shell wide" data-signals="{amountMode: '{{if .Guess}}{{.Guess.AmountMode}}{{else}}signed{{end}}', useProfile: {{if and .Guess .Guess.ProfileID}}true{{else}}false{{end}}}">
   <header class="topbar"><a href="/import">← Import</a></header>
   <h1>Map columns</h1>
   <p class="muted">{{if .Batch}}{{.Batch.Filename}} · {{len .Headers}} columns detected{{end}}</p>
@@ -85,7 +91,7 @@
       <label for="account_id">Import into account</label>
       <select id="account_id" name="account_id" required>
         <option value="">Select…</option>
-        {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        {{range .Accounts}}<option value="{{.ID}}" {{if and $.Guess (eq $.Guess.AccountID .ID)}}selected{{end}}>{{.Name}}</option>{{end}}
       </select>
     </div>
 
@@ -94,8 +100,9 @@
       <label for="profile_id">Reuse saved profile (optional)</label>
       <select id="profile_id" name="profile_id" data-on:change="$useProfile = evt.target.value !== ''">
         <option value="">Map manually / save new</option>
-        {{range .Profiles}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        {{range .Profiles}}<option value="{{.ID}}" {{if and $.Guess (eq $.Guess.ProfileID .ID)}}selected{{end}}>{{.Name}}</option>{{end}}
       </select>
+      {{if and .Guess .Guess.ProfileID}}<p class="tiny muted" data-show="$useProfile">Picked “{{.Guess.ProfileName}}” because its columns match this file. Check the account above.</p>{{end}}
     </div>
     {{end}}
 
@@ -211,6 +218,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Preview import</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/categorize.js" defer></script>
 </head>
 <body>
 <div class="app-shell wide">
@@ -220,12 +228,24 @@
       <h1 style="margin:0">Preview</h1>
       <p class="muted" style="margin:.25rem 0 0">{{.Batch.Filename}} → {{.Batch.AccountName}} · {{.Total}} rows</p>
     </div>
-    <form method="post" action="/import/{{.Batch.ID}}/commit">
-      {{template "csrf" .}}
-      <button class="btn btn-primary" type="submit">Commit import</button>
-    </form>
+    <div class="row">
+      <form method="post" action="/import/{{.Batch.ID}}/cancel" onsubmit="return confirm('Discard this import? Nothing has been committed yet.')">
+        {{template "csrf" .}}
+        <button class="btn btn-ghost" type="submit">Cancel import</button>
+      </form>
+      <form method="post" action="/import/{{.Batch.ID}}/commit">
+        {{template "csrf" .}}
+        <button class="btn btn-primary" type="submit">Commit import</button>
+      </form>
+    </div>
   </div>
   {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  {{if .ErrorCount}}
+  <div class="alert alert-error">
+    {{.ErrorCount}} of {{.Total}} rows couldn't be parsed and will be skipped (first error: {{.FirstError}}).
+    <a href="/import/{{.Batch.ID}}/map">Re-map columns</a>
+  </div>
+  {{end}}
 
   <div class="row" style="margin:1rem 0;gap:.75rem;flex-wrap:wrap">
     <a class="chip {{if not .ExceptionsOnly}}chip-warn{{end}}" href="/import/{{.Batch.ID}}/preview">All</a>
@@ -236,6 +256,12 @@
     {{template "csrf" .}}
     <div class="spread" style="margin-bottom:.75rem">
       <div class="row">
+        <label class="row tiny" style="gap:.35rem">
+          <input type="checkbox" aria-label="Select all rows on this page"
+            onchange="this.form.querySelectorAll('input[name=row_id]').forEach(c => c.checked = this.checked)">
+          Select all
+        </label>
+        <button type="button" class="btn btn-sm btn-primary" data-cat-selected data-batch="{{.Batch.ID}}">Categorize selected…</button>
         <select name="bulk_action">
           <option value="import">Set selected → import</option>
           <option value="skip">Set selected → skip</option>
@@ -253,8 +279,9 @@
           <div class="tx-payee">{{if .RenamePayee}}{{.RenamePayee}} <span class="tiny muted">(was {{.PayeeName}})</span>{{else if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
           <div class="tx-meta">
             {{.TransactionDate}} · row {{add .RowIndex 1}}
-            {{if .MatchedRuleName}} · <span class="chip">Rule: {{.MatchedRuleName}}</span>{{end}}
-            {{if .CategoryName}} · {{.CategoryName}}{{end}}
+            {{if and (not .Exception) (eq .Action "import")}} · {{template "cat-chip" (dict "Target" "staging" "Batch" $.Batch.ID "IDs" .ID "Payee" .PayeeName "Amount" .Amount "Account" (ptrID $.Batch.AccountID) "Current" (ptrID .CategoryID) "Name" .CategoryName "Person" .Person "Remember" true)}}
+            {{else if .CategoryName}} · {{.CategoryName}}{{end}}
+            {{if and .MatchedRuleName .NeedsReview}} · <span class="chip" data-auto-note="{{.ID}}">{{if .MatchedRuleID}}Rule: {{end}}{{.MatchedRuleName}}</span>{{end}}
             {{if .Exception}} · <span class="chip chip-warn">{{.Exception}}</span>{{end}}
             {{if .DuplicateTxID}} · <span class="chip chip-warn">Duplicate? {{.DuplicateSummary}}</span>{{end}}
             {{if .MatchTxID}} · <span class="chip">Merge ← {{.MatchSummary}}</span>{{end}}
@@ -266,7 +293,8 @@
           </div>
         </div>
       </div>
-      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+      {{if .Exception}}<div class="tx-amount muted">—</div>
+      {{else}}<div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>{{end}}
     </article>
     {{else}}
     <p class="muted">No rows on this page.</p>
