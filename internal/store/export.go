@@ -10,7 +10,7 @@ import (
 )
 
 // ExportTransactionsCSV writes the current register filter set as CSV.
-func (s *Store) ExportTransactionsCSV(w io.Writer, f RegisterFilter) error {
+func (s *Store) ExportTransactionsCSV(w io.Writer, f QueryFilter) error {
 	if f.Limit <= 0 {
 		f.Limit = 10000
 	}
@@ -50,9 +50,13 @@ func (s *Store) ExportTransactionsCSV(w io.Writer, f RegisterFilter) error {
 	return cw.Error()
 }
 
-func (s *Store) ExportFilterSummary(f RegisterFilter) string {
-	if f.AccountID > 0 {
-		return fmt.Sprintf("account_%d", f.AccountID)
+func (s *Store) ExportFilterSummary(f QueryFilter) string {
+	f.NormalizeAccounts()
+	if len(f.AccountIDs) == 1 {
+		return fmt.Sprintf("account_%d", f.AccountIDs[0])
+	}
+	if f.DateFrom != "" || f.DateTo != "" {
+		return fmt.Sprintf("%s_%s", f.DateFrom, f.DateTo)
 	}
 	return "all"
 }

@@ -1,0 +1,219 @@
+{{define "filter-chips"}}
+{{if .Filter.Chips}}
+<div class="filter-chips" id="filter-chips">
+  {{range .Filter.Chips}}
+  <a class="chip chip-active" href="{{.Href}}">{{.Label}} <span aria-hidden="true">×</span></a>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "filter-phone-bar"}}
+<div class="filter-phone-bar">
+  <div class="row" style="gap:.4rem;flex-wrap:wrap">
+    {{range .Filter.Presets}}
+    {{if or (eq .Value "this_month") (eq .Value "last_30") (eq .Value "last_month") (eq .Value "all")}}
+    <a class="chip {{if eq $.Filter.Filter.DatePreset .Value}}chip-ok{{end}}"
+       href="{{$.Filter.ReportPath}}?preset={{.Value}}{{if $.Filter.Grain}}&grain={{$.Filter.Grain}}{{end}}{{if $.Filter.GroupBy}}&group={{$.Filter.GroupBy}}{{end}}">{{.Label}}</a>
+    {{end}}
+    {{end}}
+    <a class="chip {{if containsStr .Filter.Filter.People "shared"}}chip-ok{{end}}"
+       href="{{.Filter.ReportPath}}?preset={{.Filter.Filter.DatePreset}}&person=shared{{if .Filter.Grain}}&grain={{.Filter.Grain}}{{end}}{{if .Filter.GroupBy}}&group={{.Filter.GroupBy}}{{end}}">Shared</a>
+    <a class="chip {{if containsStr .Filter.Filter.People "a"}}chip-ok{{end}}"
+       href="{{.Filter.ReportPath}}?preset={{.Filter.Filter.DatePreset}}&person=a{{if .Filter.Grain}}&grain={{.Filter.Grain}}{{end}}{{if .Filter.GroupBy}}&group={{.Filter.GroupBy}}{{end}}">{{.NameA}}</a>
+    <a class="chip {{if containsStr .Filter.Filter.People "b"}}chip-ok{{end}}"
+       href="{{.Filter.ReportPath}}?preset={{.Filter.Filter.DatePreset}}&person=b{{if .Filter.Grain}}&grain={{.Filter.Grain}}{{end}}{{if .Filter.GroupBy}}&group={{.Filter.GroupBy}}{{end}}">{{.NameB}}</a>
+    <button type="button" class="btn btn-sm btn-ghost" data-on:click="$filtersOpen = true">Filters</button>
+  </div>
+  {{template "filter-chips" .}}
+  {{template "filter-sheet" .}}
+</div>
+{{end}}
+
+{{define "filter-sheet"}}
+<div class="sheet-backdrop" data-class:open="$filtersOpen" data-on:click="$filtersOpen = false"></div>
+<aside class="sheet filter-sheet" data-class:open="$filtersOpen" id="filter-sheet" aria-label="Filters">
+  <div class="sheet-handle"></div>
+  <div class="spread"><h2 style="margin:0">Filters</h2>
+    <button type="button" class="btn btn-sm btn-ghost" data-on:click="$filtersOpen = false">Close</button>
+  </div>
+  <form method="get" action="{{.Filter.ReportPath}}" class="stack" style="margin-top:1rem">
+    {{template "filter-fields" .}}
+    <button class="btn btn-primary btn-block" type="submit">Apply</button>
+  </form>
+  {{template "filter-save" .}}
+</aside>
+{{end}}
+
+{{define "filter-sidebar"}}
+<aside class="filter-sidebar panel stack" id="filter-sidebar">
+  <h2 style="margin:0">Filters</h2>
+  <form method="get" action="{{.Filter.ReportPath}}" class="stack">
+    {{template "filter-fields" .}}
+    <button class="btn btn-primary btn-block" type="submit">Apply</button>
+  </form>
+  {{template "filter-chips" .}}
+  {{template "filter-save" .}}
+</aside>
+{{end}}
+
+{{define "filter-fields"}}
+{{if .Filter.Grain}}
+<input type="hidden" name="grain" value="{{.Filter.Grain}}">
+{{end}}
+{{if .Filter.GroupBy}}
+<input type="hidden" name="group" value="{{.Filter.GroupBy}}">
+{{end}}
+
+<div class="field">
+  <label for="preset">Date</label>
+  <select id="preset" name="preset">
+    {{range .Filter.Presets}}
+    <option value="{{.Value}}" {{if eq $.Filter.Filter.DatePreset .Value}}selected{{end}}>{{.Label}}</option>
+    {{end}}
+  </select>
+</div>
+<div class="row" style="align-items:flex-end">
+  <div class="field grow">
+    <label for="from">From</label>
+    <input id="from" name="from" type="date" value="{{.Filter.Filter.DateFrom}}">
+  </div>
+  <div class="field grow">
+    <label for="to">To</label>
+    <input id="to" name="to" type="date" value="{{.Filter.Filter.DateTo}}">
+  </div>
+</div>
+<div class="field">
+  <label for="rolling">Rolling days</label>
+  <input id="rolling" name="rolling" type="number" min="1" max="3650"
+         value="{{if .Filter.Filter.RollingDays}}{{.Filter.Filter.RollingDays}}{{else}}30{{end}}">
+</div>
+
+<div class="field">
+  <label>People</label>
+  <div class="check-grid">
+    <label class="check"><input type="checkbox" name="person" value="shared" {{if containsStr .Filter.Filter.People "shared"}}checked{{end}}> Shared</label>
+    <label class="check"><input type="checkbox" name="person" value="a" {{if containsStr .Filter.Filter.People "a"}}checked{{end}}> {{.NameA}}</label>
+    <label class="check"><input type="checkbox" name="person" value="b" {{if containsStr .Filter.Filter.People "b"}}checked{{end}}> {{.NameB}}</label>
+  </div>
+</div>
+
+<div class="field">
+  <label>Accounts</label>
+  <div class="check-grid scroll-checks">
+    {{range .Accounts}}
+    <label class="check"><input type="checkbox" name="account" value="{{.ID}}" {{if containsInt $.Filter.Filter.AccountIDs .ID}}checked{{end}}> {{.Name}}</label>
+    {{end}}
+  </div>
+</div>
+
+<div class="field">
+  <label>Categories</label>
+  <div class="check-grid scroll-checks">
+    {{range .Categories}}
+    {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
+    <label class="check"><input type="checkbox" name="category" value="{{.ID}}" {{if containsInt $.Filter.Filter.CategoryIDs .ID}}checked{{end}}>
+      {{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</label>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+
+{{if .Tags}}
+<div class="field">
+  <label>Tags (any)</label>
+  <div class="check-grid scroll-checks">
+    {{range .Tags}}
+    <label class="check"><input type="checkbox" name="tag" value="{{.ID}}" {{if containsInt $.Filter.Filter.TagIDs .ID}}checked{{end}}> {{.Name}}</label>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+<div class="field">
+  <label for="payee">Payee contains</label>
+  <input id="payee" name="payee" value="{{.Filter.Filter.Payee}}" placeholder="Starbucks">
+</div>
+
+<div class="row" style="align-items:flex-end">
+  <div class="field grow">
+    <label for="amin">Amount min</label>
+    <input id="amin" name="amin" inputmode="decimal" placeholder="-50.00" value="{{.Filter.AmountMinStr}}">
+  </div>
+  <div class="field grow">
+    <label for="amax">Amount max</label>
+    <input id="amax" name="amax" inputmode="decimal" placeholder="0" value="{{.Filter.AmountMaxStr}}">
+  </div>
+</div>
+
+<div class="field">
+  <label>Status</label>
+  <div class="check-grid">
+    <label class="check"><input type="checkbox" name="status" value="pending" {{if containsStr .Filter.Filter.Statuses "pending"}}checked{{end}}> Pending</label>
+    <label class="check"><input type="checkbox" name="status" value="cleared" {{if containsStr .Filter.Filter.Statuses "cleared"}}checked{{end}}> Cleared</label>
+    <label class="check"><input type="checkbox" name="status" value="reconciled" {{if containsStr .Filter.Filter.Statuses "reconciled"}}checked{{end}}> Reconciled</label>
+  </div>
+</div>
+
+<div class="field">
+  <label for="review">Needs review</label>
+  <select id="review" name="review">
+    <option value="" {{if eq .Filter.ReviewSel ""}}selected{{end}}>Any</option>
+    <option value="1" {{if eq .Filter.ReviewSel "1"}}selected{{end}}>Yes</option>
+    <option value="0" {{if eq .Filter.ReviewSel "0"}}selected{{end}}>No</option>
+  </select>
+</div>
+
+<div class="field">
+  <label for="q">Text</label>
+  <input id="q" name="q" value="{{.Filter.Filter.Text}}" placeholder="Search payee or notes">
+</div>
+{{end}}
+
+{{define "filter-save"}}
+<details class="filter-save">
+  <summary class="tiny muted">Saved filters</summary>
+  <form method="post" action="/filters/save" class="stack" style="margin-top:.75rem">
+    {{template "csrf" .}}
+    <input type="hidden" name="redirect" value="{{.Filter.ReportPath}}?{{.Filter.QueryString}}">
+    {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
+    {{range .Filter.Filter.CategoryIDs}}<input type="hidden" name="category" value="{{.}}">{{end}}
+    {{range .Filter.Filter.TagIDs}}<input type="hidden" name="tag" value="{{.}}">{{end}}
+    {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
+    {{range .Filter.Filter.Statuses}}<input type="hidden" name="status" value="{{.}}">{{end}}
+    <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
+    <input type="hidden" name="from" value="{{.Filter.Filter.DateFrom}}">
+    <input type="hidden" name="to" value="{{.Filter.Filter.DateTo}}">
+    {{if .Filter.Filter.RollingDays}}<input type="hidden" name="rolling" value="{{.Filter.Filter.RollingDays}}">{{end}}
+    <input type="hidden" name="payee" value="{{.Filter.Filter.Payee}}">
+    <input type="hidden" name="q" value="{{.Filter.Filter.Text}}">
+    {{if .Filter.AmountMinStr}}<input type="hidden" name="amin" value="{{.Filter.AmountMinStr}}">{{end}}
+    {{if .Filter.AmountMaxStr}}<input type="hidden" name="amax" value="{{.Filter.AmountMaxStr}}">{{end}}
+    {{if .Filter.ReviewSel}}<input type="hidden" name="review" value="{{.Filter.ReviewSel}}">{{end}}
+    <div class="field"><label>Name</label><input name="name" required maxlength="80" placeholder="Coffee this month"></div>
+    <button class="btn btn-sm btn-ghost" type="submit">Save current</button>
+  </form>
+  {{if .Filter.Saved}}
+  <ul class="saved-list">
+    {{range .Filter.Saved}}
+    <li class="spread">
+      <a href="{{$.Filter.ReportPath}}?saved={{.ID}}{{if $.Filter.Grain}}&grain={{$.Filter.Grain}}{{end}}{{if $.Filter.GroupBy}}&group={{$.Filter.GroupBy}}{{end}}">{{.Name}}</a>
+      <form method="post" action="/filters/saved/{{.ID}}/delete">
+        {{template "csrf" $}}
+        <input type="hidden" name="redirect" value="{{$.Filter.ReportPath}}">
+        <button class="btn btn-sm btn-ghost" type="submit">Delete</button>
+      </form>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+</details>
+{{end}}
+
+{{define "report-nav"}}
+<nav class="report-nav row" aria-label="Reports">
+  <a class="chip {{if eq .NavReport "explore"}}chip-ok{{end}}" href="/explore?{{.Filter.QueryString}}">Spending</a>
+  <a class="chip {{if eq .NavReport "cashflow"}}chip-ok{{end}}" href="/reports/cashflow?{{.Filter.QueryString}}">Cash flow</a>
+  <a class="chip {{if eq .NavReport "pivot"}}chip-ok{{end}}" href="/reports/pivot?{{.Filter.QueryString}}">Pivot</a>
+</nav>
+{{end}}

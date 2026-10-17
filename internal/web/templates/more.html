@@ -18,6 +18,18 @@
   <p class="muted">Categories, tags, and payees for the shared ledger.</p>
 
   <div class="panel" style="margin-top:1rem">
+    <a class="list-row" href="/explore" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Spending Explore</div><div class="tiny muted">Group by category, payee, tag, person, account</div></div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/reports/cashflow" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Cash flow</div><div class="tiny muted">Income, expense, net by grain</div></div>
+      <span class="faint">›</span>
+    </a>
+    <a class="list-row" href="/reports/pivot" style="color:inherit;text-decoration:none">
+      <div><div style="font-weight:600">Segment × time</div><div class="tiny muted">Pivot table + stacked bar</div></div>
+      <span class="faint">›</span>
+    </a>
     <a class="list-row" href="/import" style="color:inherit;text-decoration:none">
       <div><div style="font-weight:600">Import CSV</div><div class="tiny muted">Mapping, rules, preview, batch undo</div></div>
       <span class="faint">›</span>
@@ -44,7 +56,7 @@
     </a>
   </div>
 
-  <p class="tiny faint" style="margin-top:1.5rem">Reports, budgets, and coaching ship in later slices.</p>
+  <p class="tiny faint" style="margin-top:1.5rem">Budgets, Home widgets, and coaching ship in later slices.</p>
 </div>
 <button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
 {{template "quickadd-sheet" .}}

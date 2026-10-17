@@ -1,0 +1,307 @@
+{{define "explore"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Spending Explore — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Spending Explore</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Group spending, then drill into transactions.</p>
+    </div>
+  </div>
+
+  {{template "report-nav" dict "NavReport" "explore" "Filter" .Filter}}
+
+  <div class="explore-grid">
+    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
+    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+
+    <div class="stack explore-main">
+      <form method="get" action="/explore" class="row panel" style="align-items:flex-end">
+        <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
+        {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
+        {{range .Filter.Filter.CategoryIDs}}<input type="hidden" name="category" value="{{.}}">{{end}}
+        {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
+        {{range .Filter.Filter.TagIDs}}<input type="hidden" name="tag" value="{{.}}">{{end}}
+        <input type="hidden" name="payee" value="{{.Filter.Filter.Payee}}">
+        <input type="hidden" name="q" value="{{.Filter.Filter.Text}}">
+        <div class="field grow">
+          <label for="group">Group by</label>
+          <select id="group" name="group">
+            <option value="category" {{if eq .GroupBy "category"}}selected{{end}}>Category</option>
+            <option value="payee" {{if eq .GroupBy "payee"}}selected{{end}}>Payee</option>
+            <option value="tag" {{if eq .GroupBy "tag"}}selected{{end}}>Tag</option>
+            <option value="person" {{if eq .GroupBy "person"}}selected{{end}}>Person</option>
+            <option value="account" {{if eq .GroupBy "account"}}selected{{end}}>Account</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+
+      <div class="panel report-totals">
+        <div class="tiny muted">Total spend</div>
+        <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
+      </div>
+
+      <div class="panel chart-panel" data-chart>
+        <div class="chart-wrap"><canvas aria-label="Spending chart"></canvas></div>
+        <script type="application/json">{{.ChartJSON}}</script>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-top:0">Breakdown</h2>
+        {{if not .Segments}}
+        <p class="muted">No expense in this range.</p>
+        {{else}}
+        <div class="table-list">
+          {{range .Segments}}
+          <a class="list-row" {{txFilterAttr .DrillQuery}} style="color:inherit;text-decoration:none">
+            <div>
+              <div style="font-weight:600">{{.Label}}</div>
+              <div class="tiny muted">{{.Count}} tx</div>
+            </div>
+            <div class="tx-amount neg">{{moneyAbs .Amount $.Currency}}</div>
+          </a>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
+
+{{define "cashflow"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Cash flow — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Cash flow</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Income, expense, and net by period. * = in progress.</p>
+    </div>
+  </div>
+
+  {{template "report-nav" dict "NavReport" "cashflow" "Filter" .Filter}}
+
+  <div class="explore-grid">
+    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
+    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+
+    <div class="stack explore-main">
+      <form method="get" action="/reports/cashflow" class="row panel" style="align-items:flex-end">
+        <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
+        {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
+        {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
+        <div class="field grow">
+          <label for="grain">Grain</label>
+          <select id="grain" name="grain">
+            <option value="day" {{if eq .Grain "day"}}selected{{end}}>Day</option>
+            <option value="week" {{if eq .Grain "week"}}selected{{end}}>Week</option>
+            <option value="month" {{if eq .Grain "month"}}selected{{end}}>Month</option>
+            <option value="quarter" {{if eq .Grain "quarter"}}selected{{end}}>Quarter</option>
+            <option value="year" {{if eq .Grain "year"}}selected{{end}}>Year</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+
+      <div class="panel report-totals totals-row">
+        <div><div class="tiny muted">Income</div><div class="report-total pos">{{money .IncomeTotal .Currency}}</div></div>
+        <div><div class="tiny muted">Expense</div><div class="report-total neg">{{moneyAbs .ExpenseTotal .Currency}}</div></div>
+        <div><div class="tiny muted">Net</div><div class="report-total {{if lt .ReportTotal 0}}neg{{else}}pos{{end}}">{{money .ReportTotal .Currency}}</div></div>
+      </div>
+
+      <div class="panel chart-panel" data-chart>
+        <div class="chart-wrap"><canvas aria-label="Cash flow chart"></canvas></div>
+        <script type="application/json">{{.ChartJSON}}</script>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-top:0">By period</h2>
+        {{if not .CashFlow}}
+        <p class="muted">No cash flow in this range.</p>
+        {{else}}
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>Period</th><th>Income</th><th>Expense</th><th>Net</th></tr></thead>
+            <tbody>
+            {{range .CashFlow}}
+            <tr>
+              <td>{{.Label}}{{if .InProgress}} <span class="chip chip-warn">in progress</span>{{end}}</td>
+              <td class="num pos">{{money .Income $.Currency}}</td>
+              <td class="num neg">{{moneyAbs .Expense $.Currency}}</td>
+              <td class="num {{if lt .Net 0}}neg{{else}}pos{{end}}">{{money .Net $.Currency}}</td>
+            </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}
+
+{{define "pivot"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Segment × time — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/js/chart-adapter.js"></script>
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{filtersOpen: false}">
+<div class="app-shell wide explore-layout">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <div class="spread" style="margin:.5rem 0 1rem">
+    <div>
+      <h1 style="margin:0">Segment × time</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Pivot spend by dimension and grain. Tap a cell to drill down.</p>
+    </div>
+  </div>
+
+  {{template "report-nav" dict "NavReport" "pivot" "Filter" .Filter}}
+
+  <div class="explore-grid">
+    <div class="filter-desktop">{{template "filter-sidebar" .}}</div>
+    <div class="filter-mobile">{{template "filter-phone-bar" .}}</div>
+
+    <div class="stack explore-main">
+      <form method="get" action="/reports/pivot" class="row panel" style="align-items:flex-end">
+        <input type="hidden" name="preset" value="{{.Filter.Filter.DatePreset}}">
+        {{range .Filter.Filter.AccountIDs}}<input type="hidden" name="account" value="{{.}}">{{end}}
+        {{range .Filter.Filter.People}}<input type="hidden" name="person" value="{{.}}">{{end}}
+        <div class="field grow">
+          <label for="group">Rows</label>
+          <select id="group" name="group">
+            <option value="category" {{if eq .GroupBy "category"}}selected{{end}}>Category</option>
+            <option value="payee" {{if eq .GroupBy "payee"}}selected{{end}}>Payee</option>
+            <option value="tag" {{if eq .GroupBy "tag"}}selected{{end}}>Tag</option>
+            <option value="person" {{if eq .GroupBy "person"}}selected{{end}}>Person</option>
+            <option value="account" {{if eq .GroupBy "account"}}selected{{end}}>Account</option>
+          </select>
+        </div>
+        <div class="field grow">
+          <label for="grain">Columns</label>
+          <select id="grain" name="grain">
+            <option value="week" {{if eq .Grain "week"}}selected{{end}}>Week</option>
+            <option value="month" {{if eq .Grain "month"}}selected{{end}}>Month</option>
+            <option value="quarter" {{if eq .Grain "quarter"}}selected{{end}}>Quarter</option>
+            <option value="year" {{if eq .Grain "year"}}selected{{end}}>Year</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+
+      <div class="panel report-totals">
+        <div class="tiny muted">Total spend</div>
+        <div class="report-total">{{moneyAbs .ReportTotal .Currency}}</div>
+      </div>
+
+      {{if .ShowChart}}
+      <div class="panel chart-panel" data-chart>
+        <div class="chart-wrap chart-wrap-tall"><canvas aria-label="Pivot stacked bar"></canvas></div>
+        <script type="application/json">{{.ChartJSON}}</script>
+      </div>
+      {{else}}
+      <p class="tiny muted">Chart hidden when too many rows/columns — table still available.</p>
+      {{end}}
+
+      {{if .Pivot}}
+      <div class="panel">
+        <div class="table-scroll">
+          <table class="data-table pivot-table">
+            <thead>
+              <tr>
+                <th>{{.GroupBy}}</th>
+                {{range $i, $lab := .Pivot.ColLabels}}
+                <th>{{$lab}}{{if eq (index $.Pivot.ColKeys $i) $.Pivot.InProgCol}} *{{end}}</th>
+                {{end}}
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+            {{range $i, $rk := .Pivot.RowKeys}}
+            <tr>
+              <td>{{index $.Pivot.RowLabels $i}}</td>
+              {{range $ck := $.Pivot.ColKeys}}
+              <td class="num">
+                {{$amt := $.Pivot.CellAmount $rk $ck}}
+                {{if $amt}}
+                <a href="/transactions?{{$.Filter.QueryString}}&amp;{{if eq $.GroupBy "category"}}category={{$rk}}{{else if eq $.GroupBy "account"}}account={{$rk}}{{else if eq $.GroupBy "person"}}person={{$rk}}{{else if eq $.GroupBy "payee"}}payee={{index $.Pivot.RowLabels $i}}{{else if eq $.GroupBy "tag"}}tag={{$rk}}{{end}}">{{moneyAbs $amt $.Currency}}</a>
+                {{else}}
+                <span class="faint">—</span>
+                {{end}}
+              </td>
+              {{end}}
+              <td class="num"><strong>{{moneyAbs ($.Pivot.RowTotal $rk) $.Currency}}</strong></td>
+            </tr>
+            {{end}}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th>Total</th>
+                {{range $ck := .Pivot.ColKeys}}
+                <th class="num">{{moneyAbs ($.Pivot.ColTotal $ck) $.Currency}}</th>
+                {{end}}
+                <th class="num">{{moneyAbs .Pivot.Grand .Currency}}</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      {{else}}
+      <p class="muted">No data.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

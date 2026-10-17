@@ -46,6 +46,29 @@ var Funcs = template.FuncMap{
 		return *p
 	},
 	"sub": func(a, b int) int { return a - b },
+	"containsInt": func(ids []int64, id int64) bool {
+		for _, x := range ids {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	},
+	"containsStr": func(vals []string, s string) bool {
+		for _, x := range vals {
+			if x == s {
+				return true
+			}
+		}
+		return false
+	},
+	// Full href attribute — html/template URL-escapes bare query strings in href="…".
+	"txFilterAttr": func(query string) template.HTMLAttr {
+		if query == "" {
+			return template.HTMLAttr(`href="/transactions"`)
+		}
+		return template.HTMLAttr(`href="/transactions?` + query + `"`)
+	},
 	"personLabel": func(slot, nameA, nameB string) string {
 		switch slot {
 		case "a":

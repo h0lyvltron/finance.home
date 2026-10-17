@@ -16,12 +16,28 @@ func (a *App) transactionsList(w http.ResponseWriter, r *http.Request, sess *aut
 	d := a.base(r, sess)
 	d.Nav = "transactions"
 	a.withQuickAdd(&d)
-	txs, err := a.Store.ListTransactions(store.RegisterFilter{Limit: 75})
+	a.withFilterOptions(&d)
+
+	f, err := a.loadFilter(r, sess)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	// Activity without date intent: show recent across all time
+	if r.FormValue("preset") == "" && r.FormValue("from") == "" && r.FormValue("to") == "" &&
+		r.FormValue("rolling") == "" && r.FormValue("saved") == "" {
+		f.DatePreset = "all"
+		f.DateFrom, f.DateTo = "", ""
+	}
+	f.Limit = 75
+	txs, err := a.Store.ListTransactions(f)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	d.Transactions = txs
+	d.Filter = a.filterViewFor(r, sess, f, "/transactions", "", "")
+	d.QueryString = d.Filter.QueryString
 	a.Render.RenderHTTP(w, "transactions", d)
 }
 

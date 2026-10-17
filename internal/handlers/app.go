@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"html/template"
 	"net/http"
 	"strings"
 
@@ -71,6 +72,20 @@ type pageData struct {
 	TotalPages      int
 	ExceptionsOnly  bool
 	ImportedCount   int
+	// filters / reports
+	Filter       filterView
+	GroupBy      string
+	Grain        string
+	Segments     []store.SegmentTotal
+	CashFlow     []store.CashFlowPoint
+	Pivot        *store.PivotTable
+	ReportTotal  int64
+	IncomeTotal  int64
+	ExpenseTotal int64
+	ChartJSON    template.JS
+	ShowChart    bool
+	DrillBase    string
+	QueryString  string
 }
 
 type reconcileResult struct {
@@ -143,6 +158,12 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /transactions", a.requireAuth(a.csrf(a.transactionCreate)))
 	mux.HandleFunc("POST /transactions/quick", a.requireAuth(a.csrf(a.quickAdd)))
 	mux.HandleFunc("POST /transactions/{id}/delete", a.requireAuth(a.csrf(a.transactionDelete)))
+
+	mux.HandleFunc("GET /explore", a.requireAuth(a.explorePage))
+	mux.HandleFunc("GET /reports/cashflow", a.requireAuth(a.cashflowPage))
+	mux.HandleFunc("GET /reports/pivot", a.requireAuth(a.pivotPage))
+	mux.HandleFunc("POST /filters/save", a.requireAuth(a.csrf(a.saveFilterPost)))
+	mux.HandleFunc("POST /filters/saved/{id}/delete", a.requireAuth(a.csrf(a.deleteSavedFilter)))
 
 	mux.HandleFunc("GET /transfers/new", a.requireAuth(a.transferNew))
 	mux.HandleFunc("POST /transfers", a.requireAuth(a.csrf(a.transferCreate)))

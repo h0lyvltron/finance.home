@@ -269,10 +269,20 @@ func (a *App) importUndo(w http.ResponseWriter, r *http.Request, sess *auth.Sess
 }
 
 func (a *App) exportCSV(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
-	acctID, _ := strconv.ParseInt(r.URL.Query().Get("account_id"), 10, 64)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="transactions.csv"`)
-	f := store.RegisterFilter{AccountID: acctID, Limit: 10000}
+	f, err := a.loadFilter(r, sess)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if r.URL.Query().Get("preset") == "" && r.URL.Query().Get("from") == "" &&
+		r.URL.Query().Get("account") == "" && r.URL.Query().Get("account_id") != "" {
+		// legacy single-account export
+		acctID, _ := strconv.ParseInt(r.URL.Query().Get("account_id"), 10, 64)
+		f = store.QueryFilter{AccountID: acctID, AccountIDs: []int64{acctID}}
+	}
+	f.Limit = 10000
 	if err := a.Store.ExportTransactionsCSV(w, f); err != nil {
 		http.Error(w, err.Error(), 500)
 	}
