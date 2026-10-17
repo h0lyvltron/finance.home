@@ -1,6 +1,6 @@
-#/data/
-#*.db
-#*.db-*
+/data/
+*.db
+*.db-*
 /bin/
 /dist/
 .DS_Store
