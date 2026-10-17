@@ -40,6 +40,7 @@ type pageData struct {
 	ShowRunning  bool
 	NetWorth     int64
 	People       []models.Person
+	ReviewCount  int
 	// forms / misc
 	Form            any
 	FormBalance     string
@@ -55,6 +56,21 @@ type pageData struct {
 	Result          *reconcileResult
 	UndoID          string
 	Message         string
+	// import / rules
+	Batches         []models.ImportBatch
+	Batch           *models.ImportBatch
+	Profiles        []models.MappingProfile
+	Rules           []models.PayeeRule
+	StagingRows     []models.StagingRow
+	DrawerRow       *models.StagingRow
+	Headers         []string
+	Guess           any
+	Page            int
+	PageSize        int
+	Total           int
+	TotalPages      int
+	ExceptionsOnly  bool
+	ImportedCount   int
 }
 
 type reconcileResult struct {
@@ -81,6 +97,9 @@ func (a *App) base(r *http.Request, sess *auth.Session) pageData {
 		}
 	}
 	d.People = people
+	if n, err := a.Store.NeedsReviewCount(); err == nil {
+		d.ReviewCount = n
+	}
 	return d
 }
 
@@ -138,6 +157,31 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /payees", a.requireAuth(a.payeesPage))
 	mux.HandleFunc("POST /payees", a.requireAuth(a.csrf(a.payeeCreate)))
 
+	mux.HandleFunc("GET /import", a.requireAuth(a.importHome))
+	mux.HandleFunc("POST /import/upload", a.requireAuth(a.csrf(a.importUpload)))
+	mux.HandleFunc("GET /import/{id}/map", a.requireAuth(a.importMapGet))
+	mux.HandleFunc("POST /import/{id}/map", a.requireAuth(a.csrf(a.importMapPost)))
+	mux.HandleFunc("GET /import/{id}/preview", a.requireAuth(a.importPreview))
+	mux.HandleFunc("POST /import/{id}/rows/{row}", a.requireAuth(a.csrf(a.importRowAction)))
+	mux.HandleFunc("POST /import/{id}/bulk", a.requireAuth(a.csrf(a.importBulk)))
+	mux.HandleFunc("POST /import/{id}/commit", a.requireAuth(a.csrf(a.importCommit)))
+	mux.HandleFunc("GET /import/{id}/done", a.requireAuth(a.importDone))
+	mux.HandleFunc("POST /import/{id}/undo", a.requireAuth(a.csrf(a.importUndo)))
+
+	mux.HandleFunc("GET /review", a.requireAuth(a.reviewList))
+	mux.HandleFunc("POST /review/{id}/confirm", a.requireAuth(a.csrf(a.reviewConfirm)))
+	mux.HandleFunc("POST /review/confirm-bulk", a.requireAuth(a.csrf(a.reviewConfirmBulk)))
+
+	mux.HandleFunc("GET /rules", a.requireAuth(a.rulesPage))
+	mux.HandleFunc("POST /rules", a.requireAuth(a.csrf(a.ruleCreate)))
+	mux.HandleFunc("POST /rules/{id}/delete", a.requireAuth(a.csrf(a.ruleDelete)))
+	mux.HandleFunc("POST /rules/{id}/move", a.requireAuth(a.csrf(a.ruleMove)))
+
+	mux.HandleFunc("GET /profiles", a.requireAuth(a.profilesPage))
+	mux.HandleFunc("POST /profiles/{id}/delete", a.requireAuth(a.csrf(a.profileDelete)))
+
+	mux.HandleFunc("GET /transactions/export.csv", a.requireAuth(a.exportCSV))
+
 	return mux
 }
 
@@ -165,10 +209,22 @@ func (a *App) requireAuth(next authedHandler) http.HandlerFunc {
 
 func (a *App) csrf(next authedHandler) authedHandler {
 	return func(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
-		_ = r.ParseForm()
-		token := r.FormValue("csrf")
+		token := r.Header.Get("X-CSRF-Token")
 		if token == "" {
-			token = r.Header.Get("X-CSRF-Token")
+			ct := r.Header.Get("Content-Type")
+			if strings.HasPrefix(ct, "multipart/form-data") {
+				// Parse multipart explicitly; avoid ParseForm which leaves Form
+				// empty for multipart and prevents later FormValue from reading.
+				_ = r.ParseMultipartForm(32 << 20)
+				if r.MultipartForm != nil {
+					if vals := r.MultipartForm.Value["csrf"]; len(vals) > 0 {
+						token = vals[0]
+					}
+				}
+			}
+			if token == "" {
+				token = r.FormValue("csrf")
+			}
 		}
 		if token == "" || token != sess.CSRFToken {
 			http.Error(w, "invalid CSRF token", http.StatusForbidden)

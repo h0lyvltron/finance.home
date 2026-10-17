@@ -1,0 +1,205 @@
+{{define "rules"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Payee rules</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell wide" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/import">← Import</a></header>
+  <h1>Payee rules</h1>
+  <p class="muted">Ordered; first match wins. Shown in import preview when a rule fires.</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+  <form method="post" action="/rules" class="panel stack" style="margin:1rem 0">
+    {{template "csrf" .}}
+    <h2 style="margin:0">Add rule</h2>
+    <div class="field"><label>Name</label><input name="name" placeholder="Starbucks → Coffee"></div>
+    <div class="field"><label>Payee match</label>
+      <select name="payee_match">
+        <option value="contains">Contains</option>
+        <option value="equals">Equals</option>
+        <option value="starts_with">Starts with</option>
+      </select>
+    </div>
+    <div class="field"><label>Payee value</label><input name="payee_value" required placeholder="STARBUCKS"></div>
+    <div class="field"><label>Notes contains (optional)</label><input name="notes_contains"></div>
+    <div class="field"><label>Account (optional)</label>
+      <select name="account_id">
+        <option value="">Any account</option>
+        {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:1"><label>Amount min</label><input name="amount_min" inputmode="decimal" placeholder="-50.00"></div>
+      <div class="field" style="flex:1"><label>Amount max</label><input name="amount_max" inputmode="decimal" placeholder="0"></div>
+    </div>
+    <div class="field"><label>Set category</label>
+      <select name="set_category_id">
+        <option value="">—</option>
+        {{range .Categories}}
+        {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
+        <option value="{{.ID}}">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
+        {{end}}{{end}}
+      </select>
+    </div>
+    <div class="field"><label>Set person</label>
+      <select name="set_person">
+        <option value="">Keep default</option>
+        <option value="shared">Shared</option>
+        <option value="a">{{.NameA}}</option>
+        <option value="b">{{.NameB}}</option>
+      </select>
+    </div>
+    <div class="field"><label>Rename payee</label><input name="rename_payee" placeholder="Starbucks"></div>
+    <div class="field"><label>Tags (comma-separated)</label><input name="set_tags"></div>
+    <button class="btn btn-primary" type="submit">Add rule</button>
+  </form>
+
+  <div class="panel">
+    {{if not .Rules}}<p class="muted">No rules yet. Unmatched imports land in Needs review.</p>{{end}}
+    {{range .Rules}}
+    <div class="list-row" style="align-items:flex-start">
+      <div>
+        <div style="font-weight:600">{{.SortOrder}}. {{.Name}}</div>
+        <div class="tiny muted">
+          payee {{.PayeeMatch}} “{{.PayeeValue}}”
+          {{if .SetCategoryName}} → {{.SetCategoryName}}{{end}}
+          {{if .SetPerson}} · person {{.SetPerson}}{{end}}
+          {{if .RenamePayee}} · rename {{.RenamePayee}}{{end}}
+        </div>
+      </div>
+      <div class="row">
+        <form method="post" action="/rules/{{.ID}}/move">{{template "csrf" $}}
+          <input type="hidden" name="dir" value="up">
+          <button class="btn btn-sm btn-ghost" type="submit">↑</button>
+        </form>
+        <form method="post" action="/rules/{{.ID}}/move">{{template "csrf" $}}
+          <input type="hidden" name="dir" value="down">
+          <button class="btn btn-sm btn-ghost" type="submit">↓</button>
+        </form>
+        <form method="post" action="/rules/{{.ID}}/delete">{{template "csrf" $}}
+          <button class="btn btn-sm btn-ghost" type="submit">Delete</button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "profiles"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mapping profiles</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell" style="padding-bottom:2rem">
+  <header class="topbar"><a href="/import">← Import</a></header>
+  <h1>Mapping profiles</h1>
+  <p class="muted">Reusable bank layouts. Create them while mapping an import.</p>
+  <div class="panel">
+    {{if not .Profiles}}<p class="muted">No saved profiles yet.</p>{{end}}
+    {{range .Profiles}}
+    <div class="list-row">
+      <div>
+        <div style="font-weight:600">{{.Name}}</div>
+        <div class="tiny muted">{{.AmountMode}} · date {{.DateColumn}} · {{.DateFormat}}</div>
+      </div>
+      <form method="post" action="/profiles/{{.ID}}/delete">{{template "csrf" $}}
+        <button class="btn btn-sm btn-ghost" type="submit">Delete</button>
+      </form>
+    </div>
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "review"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Needs review</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  <div class="spread">
+    <h1 style="margin:0">Needs review</h1>
+    <span class="chip chip-warn">{{.ReviewCount}}</span>
+  </div>
+  <p class="muted">Imported and uncategorized rows stay here until you confirm.</p>
+
+  {{if not .Transactions}}
+  <div class="empty"><h2>Queue clear</h2><p>Nothing waiting for review.</p></div>
+  {{else}}
+  <form method="post" action="/review/confirm-bulk" class="panel" style="margin-top:1rem">
+    {{template "csrf" .}}
+    <div class="spread" style="margin-bottom:.75rem">
+      <span class="tiny muted">Select rows, then confirm</span>
+      <button class="btn btn-sm btn-primary" type="submit">Confirm selected</button>
+    </div>
+    {{range .Transactions}}
+    <article class="tx-card">
+      <div style="display:flex;gap:.5rem">
+        <input type="checkbox" name="tx_id" value="{{.ID}}" checked style="margin-top:.35rem">
+        <div>
+          <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+          <div class="tx-meta">{{.TransactionDate}} · {{.AccountName}}{{if .CategoryName}} · {{.CategoryName}}{{else}} · <span class="chip chip-warn">Uncategorized</span>{{end}}</div>
+        </div>
+      </div>
+      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+    </article>
+    {{end}}
+  </form>
+
+  <h2 style="margin-top:1.5rem">One at a time</h2>
+  {{range .Transactions}}
+  <form method="post" action="/review/{{.ID}}/confirm" class="panel stack" style="margin-top:.75rem">
+    {{template "csrf" $}}
+    <div class="spread">
+      <strong>{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</strong>
+      <span class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</span>
+    </div>
+    <div class="tiny muted">{{.TransactionDate}} · {{.AccountName}}</div>
+    <div class="field"><label>Payee</label><input name="payee" value="{{.PayeeName}}"></div>
+    <div class="field"><label>Category</label>
+      <select name="category_id">
+        <option value="">Keep current</option>
+        {{range $.Categories}}
+        {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
+        <option value="{{.ID}}">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
+        {{end}}{{end}}
+      </select>
+    </div>
+    <div class="field"><label>Person</label>
+      <select name="person">
+        <option value="shared" {{if eq .Person "shared"}}selected{{end}}>Shared</option>
+        <option value="a" {{if eq .Person "a"}}selected{{end}}>{{$.NameA}}</option>
+        <option value="b" {{if eq .Person "b"}}selected{{end}}>{{$.NameB}}</option>
+      </select>
+    </div>
+    <div class="field"><label>Notes</label><input name="notes" value="{{.Notes}}"></div>
+    <button class="btn btn-primary" type="submit">Confirm</button>
+  </form>
+  {{end}}
+  {{end}}
+</div>
+</body>
+</html>
+{{end}}

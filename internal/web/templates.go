@@ -39,6 +39,13 @@ var Funcs = template.FuncMap{
 	"lower":      strings.ToLower,
 	"dict":       dict,
 	"add":        func(a, b int) int { return a + b },
+	"ptrID": func(p *int64) int64 {
+		if p == nil {
+			return 0
+		}
+		return *p
+	},
+	"sub": func(a, b int) int { return a - b },
 	"personLabel": func(slot, nameA, nameB string) string {
 		switch slot {
 		case "a":

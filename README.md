@@ -29,7 +29,7 @@ docker compose up -d --build
 
 App: `http://<host-lan-ip>:3847`. SQLite lives in the `finance_data` volume.
 
-## What works (slices 0–1)
+## What works (slices 0–2)
 
 - First-run setup, cookie sessions, bcrypt, CSRF
 - Accounts (checking/savings/cash/credit/loan) with balance anchors
@@ -37,7 +37,8 @@ App: `http://<host-lan-ip>:3847`. SQLite lives in the `finance_data` volume.
 - Transactions, splits, transfers, soft-delete + undo toast
 - Quick-add sheet, phone-friendly register, running balance
 - Basic reconcile (statement date + ending balance)
+- **Import:** CSV mapping profiles, debit/credit detection, paginated preview wizard, payee rules (first match wins), duplicate advisory, manual↔import merge (±5 days), transfer pairing, needs-review queue + nav badge, batch undo, CSV export
 
 ## Deferred
 
-Reports/dashboard builder, CSV import, budgets/coaching, PIN unlock, nightly backups UI — later slices per the product spec.
+Reports/dashboard builder, budgets/coaching, PIN unlock, nightly backups UI — later slices per the product spec.

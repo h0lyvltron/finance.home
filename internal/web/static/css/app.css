@@ -237,6 +237,20 @@ h3 { font-size: 1.05rem; }
   background: var(--accent-soft);
   text-decoration: none;
 }
+.nav-badge {
+  display: inline-block;
+  min-width: 1.1rem;
+  padding: 0 .28rem;
+  margin-left: .2rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-size: .65rem;
+  font-weight: 700;
+  line-height: 1.2rem;
+  vertical-align: middle;
+}
+.import-row { align-items: flex-start; }
 
 .fab {
   position: fixed;

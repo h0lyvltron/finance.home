@@ -1,0 +1,367 @@
+{{define "import-home"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Import — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell wide">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  <header class="topbar" style="padding-top:0"><a href="/more">← More</a></header>
+  <h1>Import CSV</h1>
+  <p class="muted">Map a bank file, preview with rules and matches, then commit. Desktop-first wizard.</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  {{if eq (printf "%s" .Flash) "undone"}}<div class="alert alert-ok">Import batch undone.</div>{{end}}
+
+  <form method="post" action="/import/upload" enctype="multipart/form-data" class="panel stack" style="margin:1rem 0">
+    {{template "csrf" .}}
+    <div class="field">
+      <label for="file">CSV file</label>
+      <input id="file" name="file" type="file" accept=".csv,text/csv,text/plain" required>
+    </div>
+    <button class="btn btn-primary" type="submit">Start import</button>
+  </form>
+
+  <div class="row" style="margin:.5rem 0 1rem;gap:1rem">
+    <a href="/rules">Payee rules</a>
+    <a href="/profiles">Mapping profiles</a>
+    <a href="/review">Review queue{{if .ReviewCount}} ({{.ReviewCount}}){{end}}</a>
+  </div>
+
+  <h2>Recent batches</h2>
+  <div class="panel">
+    {{if not .Batches}}<p class="muted">No imports yet.</p>{{end}}
+    {{range .Batches}}
+    <div class="list-row">
+      <div>
+        <div style="font-weight:600">{{if .Filename}}{{.Filename}}{{else}}Batch #{{.ID}}{{end}}</div>
+        <div class="tiny muted">{{.CreatedAt}} · {{.Status}} · {{.RowCount}} rows
+          {{if .AccountName}} · {{.AccountName}}{{end}}
+          {{if eq .Status "committed"}} · imported {{.ImportedCount}}{{end}}
+        </div>
+      </div>
+      <div class="row">
+        {{if eq .Status "uploaded"}}<a class="btn btn-sm btn-ghost" href="/import/{{.ID}}/map">Map</a>{{end}}
+        {{if eq .Status "mapped"}}<a class="btn btn-sm btn-ghost" href="/import/{{.ID}}/preview">Preview</a>{{end}}
+        {{if eq .Status "committed"}}
+        <a class="btn btn-sm btn-ghost" href="/import/{{.ID}}/done">Done</a>
+        <form method="post" action="/import/{{.ID}}/undo">{{template "csrf" $}}
+          <button class="btn btn-sm btn-ghost" type="submit">Undo batch</button>
+        </form>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "import-map"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Map CSV — Import</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell wide" data-signals="{amountMode: '{{if .Guess}}{{.Guess.AmountMode}}{{else}}signed{{end}}', useProfile: false}">
+  <header class="topbar"><a href="/import">← Import</a></header>
+  <h1>Map columns</h1>
+  <p class="muted">{{if .Batch}}{{.Batch.Filename}} · {{len .Headers}} columns detected{{end}}</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+  <form method="post" action="/import/{{.Batch.ID}}/map" class="panel stack">
+    {{template "csrf" .}}
+    <div class="field">
+      <label for="account_id">Import into account</label>
+      <select id="account_id" name="account_id" required>
+        <option value="">Select…</option>
+        {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </div>
+
+    {{if .Profiles}}
+    <div class="field">
+      <label for="profile_id">Reuse saved profile (optional)</label>
+      <select id="profile_id" name="profile_id" data-on:change="$useProfile = evt.target.value !== ''">
+        <option value="">Map manually / save new</option>
+        {{range .Profiles}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </div>
+    {{end}}
+
+    <div data-show="!$useProfile" class="stack">
+      <div class="field">
+        <label for="save_as">Save mapping as</label>
+        <input id="save_as" name="save_as" placeholder="Chase checking" value="{{if .Batch}}{{.Batch.Filename}}{{end}}">
+      </div>
+      <div class="field">
+        <label for="delimiter">Delimiter</label>
+        <select id="delimiter" name="delimiter">
+          <option value="," selected>Comma</option>
+          <option value=";">Semicolon</option>
+          <option value="\t">Tab</option>
+          <option value="|">Pipe</option>
+        </select>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" name="has_header" value="1" checked> First row is header</label>
+      </div>
+      <div class="field">
+        <label for="date_column">Date column</label>
+        <select id="date_column" name="date_column" required>
+          {{range .Headers}}
+          <option value="{{.}}" {{if and $.Guess (eq $.Guess.DateColumn .)}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="date_format">Date format</label>
+        <select id="date_format" name="date_format">
+          <option value="auto">Auto-detect</option>
+          <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+          <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+          <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="amount_mode">Amount mode</label>
+        <select id="amount_mode" name="amount_mode" data-bind:amountMode>
+          <option value="signed" {{if and .Guess (eq .Guess.AmountMode "signed")}}selected{{end}}>Signed amount column</option>
+          <option value="debit_credit" {{if and .Guess (eq .Guess.AmountMode "debit_credit")}}selected{{end}}>Debit + credit columns</option>
+        </select>
+      </div>
+      <div class="field" data-show="$amountMode === 'signed'">
+        <label for="amount_column">Amount column</label>
+        <select id="amount_column" name="amount_column">
+          {{range .Headers}}
+          <option value="{{.}}" {{if and $.Guess (eq $.Guess.AmountColumn .)}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div data-show="$amountMode === 'debit_credit'" class="stack">
+        <div class="field">
+          <label for="debit_column">Debit column</label>
+          <select id="debit_column" name="debit_column">
+            <option value="">—</option>
+            {{range .Headers}}
+            <option value="{{.}}" {{if and $.Guess (eq $.Guess.DebitColumn .)}}selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="credit_column">Credit column</label>
+          <select id="credit_column" name="credit_column">
+            <option value="">—</option>
+            {{range .Headers}}
+            <option value="{{.}}" {{if and $.Guess (eq $.Guess.CreditColumn .)}}selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="payee_column">Payee / description</label>
+        <select id="payee_column" name="payee_column">
+          <option value="">—</option>
+          {{range .Headers}}
+          <option value="{{.}}" {{if and $.Guess (eq $.Guess.PayeeColumn .)}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="notes_column">Notes (optional)</label>
+        <select id="notes_column" name="notes_column">
+          <option value="">—</option>
+          {{range .Headers}}
+          <option value="{{.}}" {{if and $.Guess (eq $.Guess.NotesColumn .)}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" name="invert_sign" value="1"> Invert signs (some credit-card exports)</label>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" type="submit">Build preview</button>
+  </form>
+
+  <details style="margin-top:1rem">
+    <summary class="muted">Detected headers</summary>
+    <div class="row" style="margin-top:.5rem">{{range .Headers}}<span class="chip">{{.}}</span>{{end}}</div>
+  </details>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "import-preview"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Preview import</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell wide">
+  <header class="topbar"><a href="/import/{{.Batch.ID}}/map">← Map</a></header>
+  <div class="spread">
+    <div>
+      <h1 style="margin:0">Preview</h1>
+      <p class="muted" style="margin:.25rem 0 0">{{.Batch.Filename}} → {{.Batch.AccountName}} · {{.Total}} rows</p>
+    </div>
+    <form method="post" action="/import/{{.Batch.ID}}/commit">
+      {{template "csrf" .}}
+      <button class="btn btn-primary" type="submit">Commit import</button>
+    </form>
+  </div>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+  <div class="row" style="margin:1rem 0;gap:.75rem;flex-wrap:wrap">
+    <a class="chip {{if not .ExceptionsOnly}}chip-warn{{end}}" href="/import/{{.Batch.ID}}/preview">All</a>
+    <a class="chip {{if .ExceptionsOnly}}chip-warn{{end}}" href="/import/{{.Batch.ID}}/preview?exceptions=1">Exceptions &amp; matches</a>
+  </div>
+
+  <form method="post" action="/import/{{.Batch.ID}}/bulk" class="panel">
+    {{template "csrf" .}}
+    <div class="spread" style="margin-bottom:.75rem">
+      <div class="row">
+        <select name="bulk_action">
+          <option value="import">Set selected → import</option>
+          <option value="skip">Set selected → skip</option>
+        </select>
+        <button class="btn btn-sm" type="submit">Apply</button>
+      </div>
+      <span class="tiny muted">Page {{.Page}} of {{if gt .TotalPages 0}}{{.TotalPages}}{{else}}1{{end}}</span>
+    </div>
+
+    {{range .StagingRows}}
+    <article class="tx-card import-row">
+      <div style="display:flex;gap:.5rem;align-items:flex-start">
+        <input type="checkbox" name="row_id" value="{{.ID}}" style="margin-top:.35rem">
+        <div>
+          <div class="tx-payee">{{if .RenamePayee}}{{.RenamePayee}} <span class="tiny muted">(was {{.PayeeName}})</span>{{else if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+          <div class="tx-meta">
+            {{.TransactionDate}} · row {{add .RowIndex 1}}
+            {{if .MatchedRuleName}} · <span class="chip">Rule: {{.MatchedRuleName}}</span>{{end}}
+            {{if .CategoryName}} · {{.CategoryName}}{{end}}
+            {{if .Exception}} · <span class="chip chip-warn">{{.Exception}}</span>{{end}}
+            {{if .DuplicateTxID}} · <span class="chip chip-warn">Duplicate? {{.DuplicateSummary}}</span>{{end}}
+            {{if .MatchTxID}} · <span class="chip">Merge ← {{.MatchSummary}}</span>{{end}}
+            {{if .TransferTxID}} · <span class="chip">Transfer pair #{{.TransferTxID}}</span>{{end}}
+          </div>
+          <div class="row" style="margin-top:.35rem">
+            <span class="chip">{{.Action}}</span>
+            <a class="tiny" href="/import/{{$.Batch.ID}}/preview?page={{$.Page}}{{if $.ExceptionsOnly}}&exceptions=1{{end}}&row={{.ID}}">Open drawer</a>
+          </div>
+        </div>
+      </div>
+      <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+    </article>
+    {{else}}
+    <p class="muted">No rows on this page.</p>
+    {{end}}
+  </form>
+
+  <div class="row" style="justify-content:center;margin:1rem 0;gap:1rem">
+    {{if gt .Page 1}}
+    <a class="btn btn-sm btn-ghost" href="/import/{{.Batch.ID}}/preview?page={{sub .Page 1}}{{if .ExceptionsOnly}}&exceptions=1{{end}}">← Prev</a>
+    {{end}}
+    {{if lt .Page .TotalPages}}
+    <a class="btn btn-sm btn-ghost" href="/import/{{.Batch.ID}}/preview?page={{add .Page 1}}{{if .ExceptionsOnly}}&exceptions=1{{end}}">Next →</a>
+    {{end}}
+  </div>
+</div>
+
+{{if .DrawerRow}}
+<div class="sheet-backdrop open" onclick="location.href='/import/{{.Batch.ID}}/preview?page={{.Page}}{{if .ExceptionsOnly}}&exceptions=1{{end}}'"></div>
+<div class="sheet open" role="dialog" aria-label="Row details">
+  <div class="sheet-handle"></div>
+  <h2 style="margin-top:0">Row {{add .DrawerRow.RowIndex 1}}</h2>
+  <p class="muted">{{.DrawerRow.PayeeName}} · {{money .DrawerRow.Amount .Currency}} · {{.DrawerRow.TransactionDate}}</p>
+  {{if .DrawerRow.MatchedRuleName}}<p><span class="chip">Rule fired: {{.DrawerRow.MatchedRuleName}}</span></p>{{end}}
+  {{if .DrawerRow.DuplicateTxID}}<p class="alert alert-error" style="margin:.5rem 0">Possible duplicate of {{.DrawerRow.DuplicateSummary}}. Choose skip or import anyway.</p>{{end}}
+  {{if .DrawerRow.MatchTxID}}<p class="alert alert-ok" style="margin:.5rem 0">Manual match: {{.DrawerRow.MatchSummary}}. Merge keeps manual category/notes/person/payee; adopts bank date + cleared.</p>{{end}}
+
+  <form method="post" action="/import/{{.Batch.ID}}/rows/{{.DrawerRow.ID}}" class="stack">
+    {{template "csrf" .}}
+    <input type="hidden" name="page" value="{{.Page}}">
+    {{if .ExceptionsOnly}}<input type="hidden" name="exceptions" value="1">{{end}}
+    <div class="field">
+      <label>Action</label>
+      <select name="action">
+        <option value="import" {{if eq .DrawerRow.Action "import"}}selected{{end}}>Import as new</option>
+        <option value="skip" {{if eq .DrawerRow.Action "skip"}}selected{{end}}>Skip</option>
+        <option value="merge" {{if eq .DrawerRow.Action "merge"}}selected{{end}}>Merge with manual</option>
+        <option value="transfer_pair" {{if eq .DrawerRow.Action "transfer_pair"}}selected{{end}}>Pair as transfer</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <select name="category_id">
+        <option value="">— needs review —</option>
+        {{range .Categories}}
+        {{if and (ne .Kind "transfer") (ne .Kind "starting_balance")}}
+        <option value="{{.ID}}" {{if eq (ptrID $.DrawerRow.CategoryID) .ID}}selected{{end}}>{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
+        {{end}}{{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label>Person</label>
+      <select name="person">
+        <option value="shared" {{if eq .DrawerRow.Person "shared"}}selected{{end}}>Shared</option>
+        <option value="a" {{if eq .DrawerRow.Person "a"}}selected{{end}}>{{.NameA}}</option>
+        <option value="b" {{if eq .DrawerRow.Person "b"}}selected{{end}}>{{.NameB}}</option>
+      </select>
+    </div>
+    <div class="field"><label>Payee</label><input name="payee" value="{{if .DrawerRow.RenamePayee}}{{.DrawerRow.RenamePayee}}{{else}}{{.DrawerRow.PayeeName}}{{end}}"></div>
+    <div class="field"><label>Notes</label><textarea name="notes">{{.DrawerRow.Notes}}</textarea></div>
+    <button class="btn btn-primary btn-block" type="submit">Save row</button>
+  </form>
+</div>
+{{end}}
+</body>
+</html>
+{{end}}
+
+{{define "import-done"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Import done</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  <h1>Import committed</h1>
+  <p class="muted">{{.ImportedCount}} rows applied from {{if .Batch}}{{.Batch.Filename}}{{end}}.</p>
+  <div class="alert alert-ok">{{.ReviewCount}} transaction{{if ne .ReviewCount 1}}s{{end}} in the review queue.</div>
+  <div class="row" style="margin-top:1rem;gap:.75rem;flex-wrap:wrap">
+    <a class="btn btn-primary" href="/review">Open review</a>
+    <a class="btn btn-ghost" href="/transactions">Activity</a>
+    <a class="btn btn-ghost" href="/import">More imports</a>
+  </div>
+  {{if and .Batch (eq .Batch.Status "committed")}}
+  <form method="post" action="/import/{{.Batch.ID}}/undo" style="margin-top:2rem">
+    {{template "csrf" .}}
+    <button class="btn btn-ghost" type="submit">Undo this batch</button>
+  </form>
+  {{end}}
+</div>
+</body>
+</html>
+{{end}}

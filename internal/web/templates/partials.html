@@ -5,7 +5,9 @@
 {{define "nav"}}
 <nav class="bottom-nav" aria-label="Main">
   <a href="/" class="{{if eq .Nav "home"}}active{{end}}">Home</a>
-  <a href="/transactions" class="{{if eq .Nav "transactions"}}active{{end}}">Activity</a>
+  <a href="/transactions" class="{{if eq .Nav "transactions"}}active{{end}}">
+    Activity{{if .ReviewCount}}<span class="nav-badge" title="Needs review">{{.ReviewCount}}</span>{{end}}
+  </a>
   <a href="/accounts" class="{{if eq .Nav "accounts"}}active{{end}}">Accounts</a>
   <a href="/more" class="{{if eq .Nav "more"}}active{{end}}">More</a>
 </nav>
@@ -42,6 +44,7 @@
         {{.TransactionDate}} · {{.AccountName}}
         {{if .IsSplit}} · Split{{else if .CategoryName}} · {{.CategoryName}}{{end}}
         {{if eq .Status "pending"}} · <span class="chip chip-warn">Pending</span>{{end}}
+        {{if .NeedsReview}} · <span class="chip chip-warn">Review</span>{{end}}
         {{if .TransferID}} · <span class="chip">Transfer</span>{{end}}
       </div>
     </div>

@@ -17,6 +17,9 @@
   <div class="spread" style="margin:.5rem 0 1rem">
     <h1 style="margin:0">Activity</h1>
     <div class="row">
+      {{if .ReviewCount}}<a class="btn btn-sm btn-ghost" href="/review">Review <span class="nav-badge">{{.ReviewCount}}</span></a>{{end}}
+      <a class="btn btn-sm btn-ghost" href="/transactions/export.csv">Export CSV</a>
+      <a class="btn btn-sm btn-ghost" href="/import">Import</a>
       <a class="btn btn-sm btn-ghost" href="/transfers/new">Transfer</a>
       <a class="btn btn-sm btn-ghost" href="/transactions/new">Full form</a>
     </div>

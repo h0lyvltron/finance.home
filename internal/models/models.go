@@ -95,3 +95,84 @@ type UndoOp struct {
 	Kind    string
 	Payload string
 }
+
+type MappingProfile struct {
+	ID           int64
+	Name         string
+	AccountID    *int64
+	DateColumn   string
+	DateFormat   string
+	AmountMode   string
+	AmountColumn string
+	DebitColumn  string
+	CreditColumn string
+	PayeeColumn  string
+	NotesColumn  string
+	InvertSign   bool
+	HasHeader    bool
+	Delimiter    string
+}
+
+type PayeeRule struct {
+	ID             int64
+	SortOrder      int
+	Name           string
+	Enabled        bool
+	PayeeMatch     string // contains|equals|starts_with
+	PayeeValue     string
+	AmountMin      *int64
+	AmountMax      *int64
+	AccountID      *int64
+	NotesContains  string
+	SetCategoryID  *int64
+	SetCategoryName string
+	SetPerson      string
+	RenamePayee    string
+	SetTags        string
+}
+
+type ImportBatch struct {
+	ID             int64
+	AccountID      *int64
+	AccountName    string
+	ProfileID      *int64
+	Filename       string
+	Status         string
+	Headers        []string
+	RowCount       int
+	ImportedCount  int
+	CreatedAt      string
+	CommittedAt    string
+}
+
+type StagingRow struct {
+	ID               int64
+	BatchID          int64
+	RowIndex         int
+	RawJSON          string
+	TransactionDate  string
+	Amount           int64
+	PayeeName        string
+	Notes            string
+	Fingerprint      string
+	Action           string // import|skip|merge|transfer_pair
+	MatchTxID        *int64
+	MatchSummary     string
+	TransferTxID     *int64
+	MatchedRuleID    *int64
+	MatchedRuleName  string
+	CategoryID       *int64
+	CategoryName     string
+	Person           string
+	RenamePayee      string
+	TagNames         string
+	Exception        string
+	DuplicateTxID    *int64
+	DuplicateSummary string
+	NeedsReview      bool
+}
+
+type ReviewItem struct {
+	Transaction
+	RuleHint string
+}
