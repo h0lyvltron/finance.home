@@ -125,6 +125,10 @@ func (f *QueryFilter) ResolveDates(h *models.Household, now time.Time) {
 	case "ytd", "this_year":
 		f.DateFrom = time.Date(today.Year(), 1, 1, 0, 0, 0, 0, today.Location()).Format("2006-01-02")
 		f.DateTo = today.Format("2006-01-02")
+	case "last_12", "last_12mo":
+		f.DatePreset = "last_12"
+		f.DateTo = today.Format("2006-01-02")
+		f.DateFrom = today.AddDate(-1, 0, 1).Format("2006-01-02")
 	case "this_month", "":
 		f.DatePreset = "this_month"
 		first := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())

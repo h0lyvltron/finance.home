@@ -103,6 +103,9 @@ type pageData struct {
 	NetWorthSeries models.NetWorthSeries
 	SavingsRate    models.SavingsRateReport
 	MonthlyRecap   models.MonthlyRecap
+	// personal dashboards (slice 6)
+	PersonalDash store.PersonalDashboard
+	DashEdit     bool
 }
 
 type reconcileResult struct {
@@ -161,6 +164,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /logout", a.logout)
 
 	mux.HandleFunc("GET /{$}", a.requireAuth(a.home))
+	mux.HandleFunc("POST /dashboard/range", a.requireAuth(a.csrf(a.dashboardSetRange)))
+	mux.HandleFunc("POST /dashboard/widgets", a.requireAuth(a.csrf(a.dashboardAddWidget)))
+	mux.HandleFunc("POST /dashboard/widgets/{id}/move", a.requireAuth(a.csrf(a.dashboardMoveWidget)))
+	mux.HandleFunc("POST /dashboard/widgets/{id}/width", a.requireAuth(a.csrf(a.dashboardSetWidth)))
+	mux.HandleFunc("POST /dashboard/widgets/{id}/delete", a.requireAuth(a.csrf(a.dashboardRemoveWidget)))
 	mux.HandleFunc("GET /plan", a.requireAuth(a.planPage))
 	mux.HandleFunc("POST /plan/settings", a.requireAuth(a.csrf(a.planSettingsPost)))
 	mux.HandleFunc("POST /plan/budgets", a.requireAuth(a.csrf(a.planBudgetsPost)))

@@ -13,24 +13,30 @@ func (a *App) home(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	d.Nav = "home"
 	a.withQuickAdd(&d)
 
-	dash, err := a.Store.BuildHomeDashboard(d.Household, time.Now())
+	edit := r.URL.Query().Get("edit") == "1"
+	d.DashEdit = edit
+	if errMsg := r.URL.Query().Get("err"); errMsg != "" {
+		d.Error = errMsg
+	}
+
+	dash, err := a.Store.BuildPersonalDashboard(sess.PersonID, d.Household, time.Now())
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	d.NetWorth = dash.NetWorth
-	d.LeftToSpend = dash.LeftToSpend
-	d.BudgetHealth = dash.BudgetHealth
-	d.Bills = dash.Bills
-	d.Insights = dash.Insights
+	d.PersonalDash = dash
 	d.YearMonth = dash.YearMonth
 	d.ReviewCount = dash.ReviewCount
 
-	txs, _ := a.Store.ListTransactions(store.RegisterFilter{Limit: 8})
-	d.Transactions = txs
-
-	accts, _ := a.Store.ListAccounts(false)
-	d.Accounts = accts
+	// Keep legacy fields populated for any shared partials
+	for _, wgt := range dash.Widgets {
+		if wgt.WidgetType == store.WidgetNetWorth {
+			d.NetWorth = wgt.NetWorth
+		}
+		if wgt.WidgetType == store.WidgetLeftToSpend {
+			d.LeftToSpend = wgt.LeftToSpend
+		}
+	}
 
 	a.Render.RenderHTTP(w, "home", d)
 }

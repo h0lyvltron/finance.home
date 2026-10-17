@@ -17,128 +17,341 @@
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <section class="stack home-curated" style="margin-top:.35rem">
-    <div class="home-hero">
-      <p class="tiny faint">Left to spend · {{.YearMonth}}</p>
-      <h1 class="home-lts {{if lt .LeftToSpend.Amount 0}}neg{{else}}pos{{end}}">{{money .LeftToSpend.Amount .Currency}}</h1>
-      <p class="muted small home-lts-breakdown">
-        {{money .LeftToSpend.ExpectedIncome .Currency}} income
-        − {{money .LeftToSpend.FixedBills .Currency}} bills
-        − {{money .LeftToSpend.FlexibleSpent .Currency}} flexible
-        − {{money .LeftToSpend.SavingsTarget .Currency}} savings
-      </p>
-      <a class="btn btn-sm btn-ghost" href="/plan?month={{.YearMonth}}">Adjust plan</a>
+  <section class="stack home-dashboard" style="margin-top:.35rem">
+    <div class="dash-toolbar spread">
+      <div>
+        <p class="tiny faint" style="margin:0">{{.Session.PersonName}}'s Home</p>
+        <form method="post" action="/dashboard/range" class="dash-range-form row" style="margin-top:.35rem;gap:.4rem">
+          {{template "csrf" .}}
+          <input type="hidden" name="return" value="{{if .DashEdit}}/?edit=1{{else}}/{{end}}">
+          <label class="sr-only" for="dash-range">Range</label>
+          <select id="dash-range" name="preset" class="dash-range-select" onchange="this.form.submit()">
+            <option value="this_month" {{if eq .PersonalDash.Layout.RangePreset "this_month"}}selected{{end}}>This month</option>
+            <option value="last_30" {{if eq .PersonalDash.Layout.RangePreset "last_30"}}selected{{end}}>Last 30d</option>
+            <option value="ytd" {{if eq .PersonalDash.Layout.RangePreset "ytd"}}selected{{end}}>YTD</option>
+            <option value="last_12" {{if eq .PersonalDash.Layout.RangePreset "last_12"}}selected{{end}}>12 mo</option>
+          </select>
+          <span class="tiny muted">{{.PersonalDash.RangeFrom}} – {{.PersonalDash.RangeTo}}</span>
+        </form>
+      </div>
+      <div class="row" style="gap:.4rem">
+        {{if .DashEdit}}
+        <a class="btn btn-sm btn-primary" href="/">Done</a>
+        {{else}}
+        <a class="btn btn-sm btn-ghost" href="/?edit=1">Edit</a>
+        {{end}}
+      </div>
     </div>
 
-    {{if .Insights}}
-    <div class="panel insights-panel">
+    {{if .Error}}
+    <p class="alert alert-error" role="alert">{{.Error}}</p>
+    {{end}}
+
+    {{if .DashEdit}}
+    <div class="panel dash-edit-panel">
       <div class="spread">
-        <h2 style="margin:0">Insights</h2>
-        <span class="tiny faint">Up to 3</span>
+        <h2 style="margin:0">Edit dashboard</h2>
+        <span class="tiny faint">Add · reorder · S/M/L</span>
       </div>
-      {{range .Insights}}
-      <a class="insight insight-{{.Tone}}" href="{{.Href}}">
-        <div>
-          <div class="insight-title">{{.Title}}</div>
-          <div class="tiny muted">{{.Detail}}</div>
+      <p class="muted small" style="margin:.5rem 0 0">Changes save as you go. Done closes edit mode.</p>
+      <form method="post" action="/dashboard/widgets" class="dash-add-form" style="margin-top:.85rem">
+        {{template "csrf" .}}
+        <input type="hidden" name="return" value="/?edit=1">
+        <div class="row" style="align-items:flex-end">
+          <div class="field grow">
+            <label for="widget_type">Add widget</label>
+            <select id="widget_type" name="widget_type" required>
+              {{range .PersonalDash.Catalog}}
+              <option value="{{.Type}}">{{.Label}}</option>
+              {{end}}
+            </select>
+          </div>
+          <div class="field" style="min-width:5.5rem">
+            <label for="width">Width</label>
+            <select id="width" name="width">
+              <option value="">Default</option>
+              <option value="s">S</option>
+              <option value="m">M</option>
+              <option value="l">L</option>
+            </select>
+          </div>
+          <div class="field grow">
+            <label for="saved_filter_id">Saved filter</label>
+            <select id="saved_filter_id" name="saved_filter_id">
+              <option value="">(if shortcut)</option>
+              {{range .PersonalDash.Saved}}
+              <option value="{{.ID}}">{{.Name}}</option>
+              {{end}}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit">Add</button>
         </div>
-        <span class="faint">›</span>
-      </a>
-      {{end}}
+      </form>
     </div>
     {{end}}
 
-    <div class="panel">
-      <div class="spread">
-        <h2 style="margin:0">Budget health</h2>
-        <a class="btn btn-sm btn-ghost" href="/plan?month={{.YearMonth}}&tab=budgets">Plan</a>
-      </div>
-      {{if and (eq .BudgetHealth.Budgeted 0) (eq .BudgetHealth.Spent 0)}}
-      <p class="muted small" style="margin:.75rem 0 0">Set category targets on Plan to track pace.</p>
-      {{else}}
-      <div class="health-grid">
-        <div>
-          <div class="tiny faint">Spent</div>
-          <div class="num-strong">{{money .BudgetHealth.Spent .Currency}}</div>
+    <div class="dash-widgets">
+      {{range $i, $w := .PersonalDash.Widgets}}
+      <article class="dash-widget width-{{$w.Width}} {{if eq $w.WidgetType "left_to_spend"}}dash-widget-hero{{end}}" data-widget="{{$w.WidgetType}}">
+        {{if $.DashEdit}}
+        <div class="dash-widget-edit">
+          <span class="tiny faint">{{$w.Label}} · {{$w.Width}}</span>
+          <div class="row" style="gap:.3rem">
+            <form method="post" action="/dashboard/widgets/{{$w.ID}}/move">
+              {{template "csrf" $}}
+              <input type="hidden" name="dir" value="up">
+              <input type="hidden" name="return" value="/?edit=1">
+              <button class="btn btn-sm btn-ghost" type="submit" {{if eq $i 0}}disabled{{end}} aria-label="Move up">↑</button>
+            </form>
+            <form method="post" action="/dashboard/widgets/{{$w.ID}}/move">
+              {{template "csrf" $}}
+              <input type="hidden" name="dir" value="down">
+              <input type="hidden" name="return" value="/?edit=1">
+              <button class="btn btn-sm btn-ghost" type="submit" {{if eq $i (sub (len $.PersonalDash.Widgets) 1)}}disabled{{end}} aria-label="Move down">↓</button>
+            </form>
+            <form method="post" action="/dashboard/widgets/{{$w.ID}}/width">
+              {{template "csrf" $}}
+              <input type="hidden" name="return" value="/?edit=1">
+              <select name="width" class="dash-width-select" onchange="this.form.submit()" aria-label="Width">
+                <option value="s" {{if eq $w.Width "s"}}selected{{end}}>S</option>
+                <option value="m" {{if eq $w.Width "m"}}selected{{end}}>M</option>
+                <option value="l" {{if eq $w.Width "l"}}selected{{end}}>L</option>
+              </select>
+            </form>
+            <form method="post" action="/dashboard/widgets/{{$w.ID}}/delete">
+              {{template "csrf" $}}
+              <input type="hidden" name="return" value="/?edit=1">
+              <button class="btn btn-sm btn-ghost" type="submit" aria-label="Remove">✕</button>
+            </form>
+          </div>
         </div>
-        <div>
-          <div class="tiny faint">Budgeted</div>
-          <div class="num-strong">{{money .BudgetHealth.Budgeted .Currency}}</div>
-        </div>
-        <div>
-          <div class="tiny faint">Over</div>
-          <div class="num-strong {{if gt .BudgetHealth.OverCents 0}}neg{{end}}">{{money .BudgetHealth.OverCents .Currency}}</div>
-        </div>
-      </div>
-      <p class="tiny muted" style="margin:.65rem 0 0">
-        {{.BudgetHealth.OverCount}} over · {{.BudgetHealth.OnTrackCount}} on track · {{.BudgetHealth.UnderCount}} under
-      </p>
-      {{end}}
-    </div>
+        {{end}}
 
-    <div class="panel">
-      <div class="spread">
-        <h2 style="margin:0">Bills · next 14 days</h2>
-        <a class="btn btn-sm btn-ghost" href="/plan?tab=bills">All</a>
-      </div>
-      {{if not .Bills}}
-      <p class="muted small" style="margin:.75rem 0 0">No upcoming bills. Add schedules on Plan.</p>
-      {{else}}
-        {{range .Bills}}
-        <div class="list-row bill-row">
-          <div>
-            <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}{{.TemplateName}}{{end}}</div>
-            <div class="tiny muted">
-              {{.DueDate}}
-              · <span class="chip {{if eq .Status "overdue"}}chip-danger{{else if eq .Status "matched"}}chip-ok{{else}}chip-warn{{end}}">{{.Status}}</span>
-              {{if .CategoryName}} · {{.CategoryName}}{{end}}
+        {{if $w.Error}}
+        <div class="panel"><p class="muted small">{{$w.Error}}</p></div>
+        {{else if eq $w.WidgetType "left_to_spend"}}
+        <div class="home-hero">
+          <p class="tiny faint">Left to spend · {{$.YearMonth}}</p>
+          <h1 class="home-lts {{if lt $w.LeftToSpend.Amount 0}}neg{{else}}pos{{end}}">{{money $w.LeftToSpend.Amount $.Currency}}</h1>
+          <p class="muted small home-lts-breakdown">
+            {{money $w.LeftToSpend.ExpectedIncome $.Currency}} income
+            − {{money $w.LeftToSpend.FixedBills $.Currency}} bills
+            − {{money $w.LeftToSpend.FlexibleSpent $.Currency}} flexible
+            − {{money $w.LeftToSpend.SavingsTarget $.Currency}} savings
+          </p>
+          <a class="btn btn-sm btn-ghost" href="/plan?month={{$.YearMonth}}">Adjust plan</a>
+        </div>
+
+        {{else if eq $w.WidgetType "insights"}}
+        <div class="panel insights-panel">
+          <div class="spread">
+            <h2 style="margin:0">Insights</h2>
+            <span class="tiny faint">Up to 3</span>
+          </div>
+          {{if not $w.Insights}}
+          <p class="muted small" style="margin:.75rem 0 0">No insights right now.</p>
+          {{else}}
+            {{range $w.Insights}}
+            <a class="insight insight-{{.Tone}}" href="{{.Href}}">
+              <div>
+                <div class="insight-title">{{.Title}}</div>
+                <div class="tiny muted">{{.Detail}}</div>
+              </div>
+              <span class="faint">›</span>
+            </a>
+            {{end}}
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "budget_health"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Budget health</h2>
+            <a class="btn btn-sm btn-ghost" href="/plan?month={{$.YearMonth}}&tab=budgets">Plan</a>
+          </div>
+          {{if and (eq $w.BudgetHealth.Budgeted 0) (eq $w.BudgetHealth.Spent 0)}}
+          <p class="muted small" style="margin:.75rem 0 0">Set category targets on Plan to track pace.</p>
+          {{else}}
+          <div class="health-grid">
+            <div>
+              <div class="tiny faint">Spent</div>
+              <div class="num-strong">{{money $w.BudgetHealth.Spent $.Currency}}</div>
+            </div>
+            <div>
+              <div class="tiny faint">Budgeted</div>
+              <div class="num-strong">{{money $w.BudgetHealth.Budgeted $.Currency}}</div>
+            </div>
+            <div>
+              <div class="tiny faint">Over</div>
+              <div class="num-strong {{if gt $w.BudgetHealth.OverCents 0}}neg{{end}}">{{money $w.BudgetHealth.OverCents $.Currency}}</div>
             </div>
           </div>
-          <div class="bill-actions">
-            <div style="font-variant-numeric:tabular-nums;font-weight:650;text-align:right">{{money .ExpectedAmount $.Currency}}</div>
-            {{if or (eq .Status "upcoming") (eq .Status "overdue")}}
-            <form method="post" action="/schedules/instances/{{.ID}}/paid" class="row" style="justify-content:flex-end;gap:.35rem;margin-top:.25rem">
-              {{template "csrf" $}}
-              <input type="hidden" name="return" value="/">
-              <button class="btn btn-sm btn-primary" type="submit">Paid</button>
-            </form>
-            {{end}}
+          <p class="tiny muted" style="margin:.65rem 0 0">
+            {{$w.BudgetHealth.OverCount}} over · {{$w.BudgetHealth.OnTrackCount}} on track · {{$w.BudgetHealth.UnderCount}} under
+          </p>
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "bills"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Bills · next 14 days</h2>
+            <a class="btn btn-sm btn-ghost" href="/plan?tab=bills">All</a>
           </div>
+          {{if not $w.Bills}}
+          <p class="muted small" style="margin:.75rem 0 0">No upcoming bills. Add schedules on Plan.</p>
+          {{else}}
+            {{range $w.Bills}}
+            <div class="list-row bill-row">
+              <div>
+                <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}{{.TemplateName}}{{end}}</div>
+                <div class="tiny muted">
+                  {{.DueDate}}
+                  · <span class="chip {{if eq .Status "overdue"}}chip-danger{{else if eq .Status "matched"}}chip-ok{{else}}chip-warn{{end}}">{{.Status}}</span>
+                  {{if .CategoryName}} · {{.CategoryName}}{{end}}
+                </div>
+              </div>
+              <div class="bill-actions">
+                <div style="font-variant-numeric:tabular-nums;font-weight:650;text-align:right">{{money .ExpectedAmount $.Currency}}</div>
+                {{if or (eq .Status "upcoming") (eq .Status "overdue")}}
+                <form method="post" action="/schedules/instances/{{.ID}}/paid" class="row" style="justify-content:flex-end;gap:.35rem;margin-top:.25rem">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="return" value="/">
+                  <button class="btn btn-sm btn-primary" type="submit">Paid</button>
+                </form>
+                {{end}}
+              </div>
+            </div>
+            {{end}}
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "net_worth"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Net worth</h2>
+            <a class="btn btn-sm btn-ghost" href="/reports/networth">History</a>
+          </div>
+          <p class="report-total" style="margin:.5rem 0 0">{{money $w.NetWorth $.Currency}}</p>
+          <p class="tiny muted">Across {{len $w.Accounts}} account{{if ne (len $w.Accounts) 1}}s{{end}}
+            {{if $.ReviewCount}} · <a href="/review">{{$.ReviewCount}} need review</a>{{end}}
+          </p>
+        </div>
+
+        {{else if eq $w.WidgetType "accounts"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Accounts</h2>
+            <a class="btn btn-sm btn-ghost" href="/accounts">All</a>
+          </div>
+          {{if not $w.Accounts}}
+          <p class="muted small" style="margin:.75rem 0 0">No accounts yet.</p>
+          {{else}}
+            {{range $w.Accounts}}
+            <a class="list-row" href="/accounts/{{.ID}}" style="color:inherit;text-decoration:none">
+              <div>
+                <div style="font-weight:600">{{.Name}}</div>
+                <div class="tiny muted">{{accountTypeLabel .Type}}</div>
+              </div>
+              <div style="font-variant-numeric:tabular-nums;font-weight:650">{{money .Balance $.Currency}}</div>
+            </a>
+            {{end}}
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "recent"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Recent</h2>
+            <a class="btn btn-sm btn-ghost" href="/transactions">Activity</a>
+          </div>
+          {{if not $w.Transactions}}
+          <p class="muted small" style="margin:.75rem 0 0">Nothing in this range.</p>
+          {{else}}
+            {{range $w.Transactions}}
+            <article class="tx-card">
+              <div>
+                <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
+                <div class="tx-meta">{{.TransactionDate}} · {{.AccountName}}</div>
+              </div>
+              <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
+            </article>
+            {{end}}
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "goals"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Goals</h2>
+            <a class="btn btn-sm btn-ghost" href="/goals">All</a>
+          </div>
+          {{if not $w.Goals}}
+          <p class="muted small" style="margin:.75rem 0 0">No goals yet. <a href="/goals">Add one</a>.</p>
+          {{else}}
+            {{range $w.Goals}}
+            <div class="list-row">
+              <div>
+                <div style="font-weight:600">{{.Goal.Name}}</div>
+                <div class="tiny muted">{{printf "%.0f" .Pct}}% · {{if .Behind}}catch-up {{money .WeeklyCatchUp $.Currency}}/wk{{else if .OnTrack}}on track{{else}}—{{end}}</div>
+              </div>
+              <div style="font-variant-numeric:tabular-nums;font-weight:650">{{money .CurrentCents $.Currency}}</div>
+            </div>
+            {{end}}
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "cash_flow"}}
+        <div class="panel chart-panel">
+          <div class="spread">
+            <h2 style="margin:0">Cash flow</h2>
+            <a class="btn btn-sm btn-ghost" href="/reports/cashflow">Report</a>
+          </div>
+          {{if $w.ShowChart}}
+          <div class="chart-wrap chart-wrap-sm" data-chart>
+            <canvas aria-label="Cash flow chart"></canvas>
+            <script type="application/json">{{asJS $w.ChartJSON}}</script>
+          </div>
+          {{else}}
+          <p class="muted small" style="margin:.75rem 0 0">No cash flow in this range.</p>
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "category_spend"}}
+        <div class="panel chart-panel">
+          <div class="spread">
+            <h2 style="margin:0">Category spend</h2>
+            <a class="btn btn-sm btn-ghost" href="/explore">Explore</a>
+          </div>
+          {{if $w.ShowChart}}
+          <div class="chart-wrap chart-wrap-sm" data-chart>
+            <canvas aria-label="Category spend chart"></canvas>
+            <script type="application/json">{{asJS $w.ChartJSON}}</script>
+          </div>
+          <p class="tiny muted" style="margin:.5rem 0 0">Total {{money $w.SegmentTotal $.Currency}}</p>
+          {{else}}
+          <p class="muted small" style="margin:.75rem 0 0">No spending in this range.</p>
+          {{end}}
+        </div>
+
+        {{else if eq $w.WidgetType "saved_filter"}}
+        <div class="panel">
+          <div class="spread">
+            <h2 style="margin:0">Shortcut</h2>
+          </div>
+          {{if $w.SavedFilter}}
+          <a class="btn btn-primary" href="{{$w.SavedHref}}" style="margin-top:.65rem;display:inline-flex">{{$w.SavedFilter.Name}}</a>
+          <p class="tiny muted" style="margin:.5rem 0 0">Opens Activity with this saved filter.</p>
+          {{else}}
+          <p class="muted small" style="margin:.75rem 0 0">Saved filter unavailable.</p>
+          {{end}}
         </div>
         {{end}}
-      {{end}}
-    </div>
-
-    <div class="panel">
-      <div class="spread">
-        <h2 style="margin:0">Net worth</h2>
-        <a class="btn btn-sm btn-ghost" href="/reports/networth">History</a>
-      </div>
-      <p class="report-total" style="margin:.5rem 0 0">{{money .NetWorth .Currency}}</p>
-      <p class="tiny muted">Across {{len .Accounts}} account{{if ne (len .Accounts) 1}}s{{end}}
-        · <a href="/goals">Goals</a>
-        · <a href="/recap">Money date</a>
-        {{if .ReviewCount}} · <a href="/review">{{.ReviewCount}} need review</a>{{end}}
-      </p>
-    </div>
-
-    <div class="panel">
-      <div class="spread">
-        <h2 style="margin:0">Recent</h2>
-        <a class="btn btn-sm btn-ghost" href="/transactions">Activity</a>
-      </div>
-      {{if not .Transactions}}
-      <p class="muted small" style="margin:.75rem 0 0">Nothing recorded yet.</p>
+      </article>
       {{else}}
-        {{range .Transactions}}
-        <article class="tx-card">
-          <div>
-            <div class="tx-payee">{{if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
-            <div class="tx-meta">{{.TransactionDate}} · {{.AccountName}}</div>
-          </div>
-          <div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>
-        </article>
-        {{end}}
+      <div class="panel">
+        <p class="muted">Your dashboard is empty.{{if not .DashEdit}} <a href="/?edit=1">Add widgets</a>.{{end}}</p>
+      </div>
       {{end}}
     </div>
   </section>

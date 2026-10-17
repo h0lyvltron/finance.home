@@ -350,3 +350,24 @@ type MonthlyRecap struct {
 	Wins            []CoachingInsight // up to 2
 	Watch           *CoachingInsight  // one watch item
 }
+
+// DashboardLayout is a per-person (or household default) ordered widget list.
+type DashboardLayout struct {
+	ID          int64
+	PersonID    *int64 // nil = household default template
+	RangePreset string // this_month | last_30 | ytd | last_12
+	CreatedAt   string
+	UpdatedAt   string
+}
+
+// DashboardWidget is one row in a personal dashboard list.
+type DashboardWidget struct {
+	ID         int64
+	LayoutID   int64
+	WidgetType string
+	Width      string // s | m | l
+	SortOrder  int
+	ConfigJSON string
+	CreatedAt  string
+	Label      string // display label (not persisted)
+}

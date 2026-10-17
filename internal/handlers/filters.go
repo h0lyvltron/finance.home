@@ -122,6 +122,8 @@ func dateChipLabel(f store.QueryFilter) string {
 		return "Last 90 days"
 	case "ytd":
 		return "YTD"
+	case "last_12", "last_12mo":
+		return "12 months"
 	case "this_year":
 		return "This year"
 	case "rolling":

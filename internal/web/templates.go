@@ -107,6 +107,12 @@ var Funcs = template.FuncMap{
 			return o
 		}
 	},
+	"asJS": func(s string) template.JS {
+		if s == "" {
+			return "null"
+		}
+		return template.JS(s)
+	},
 }
 
 func dict(values ...any) map[string]any {
