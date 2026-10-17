@@ -1,0 +1,251 @@
+{{define "plan"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Plan — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+<div class="app-shell wide">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+  <div class="spread" style="align-items:flex-end;margin-top:.25rem">
+    <div>
+      <h1 style="margin:0">Plan</h1>
+      <p class="muted small" style="margin:.25rem 0 0">Budgets, expected income, and bills</p>
+    </div>
+    <form method="get" action="/plan" class="row">
+      <input type="hidden" name="tab" value="{{.PlanTab}}">
+      <div class="field" style="margin:0">
+        <label for="month">Month</label>
+        <input id="month" type="month" name="month" value="{{.YearMonth}}" onchange="this.form.submit()">
+      </div>
+    </form>
+  </div>
+
+  <div class="plan-lts panel" style="margin-top:1rem">
+    <div class="spread">
+      <div>
+        <p class="tiny faint">Left to spend</p>
+        <p class="report-total {{if lt .LeftToSpend.Amount 0}}neg{{else}}pos{{end}}" style="margin:0">{{money .LeftToSpend.Amount .Currency}}</p>
+      </div>
+      <div class="tiny muted" style="text-align:right">
+        Income {{money .LeftToSpend.ExpectedIncome .Currency}}<br>
+        Fixed bills {{money .LeftToSpend.FixedBills .Currency}}<br>
+        Flexible spent {{money .LeftToSpend.FlexibleSpent .Currency}}<br>
+        Savings {{money .LeftToSpend.SavingsTarget .Currency}}
+      </div>
+    </div>
+  </div>
+
+  <div class="report-nav row" style="margin-top:1rem">
+    <a class="chip {{if eq .PlanTab "budgets"}}chip-active{{end}}" href="/plan?month={{.YearMonth}}&tab=budgets">Budgets</a>
+    <a class="chip {{if eq .PlanTab "bills"}}chip-active{{end}}" href="/plan?month={{.YearMonth}}&tab=bills">Bills</a>
+  </div>
+
+  {{if eq .PlanTab "budgets"}}
+  <form method="post" action="/plan/settings" class="panel stack" style="margin-top:.75rem">
+    {{template "csrf" .}}
+    <input type="hidden" name="month" value="{{.YearMonth}}">
+    <h2 style="margin:0">Household targets</h2>
+    <div class="row" style="align-items:flex-end">
+      <div class="field grow">
+        <label>Expected income / month</label>
+        <input name="expected_income" inputmode="decimal" value="{{centsInput .LeftToSpend.ExpectedIncome}}" placeholder="0.00">
+      </div>
+      <div class="field grow">
+        <label>Savings contribution</label>
+        <input name="savings_target" inputmode="decimal" value="{{centsInput .LeftToSpend.SavingsTarget}}" placeholder="0.00">
+      </div>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+
+  <form method="post" action="/plan/budgets/copy" class="row" style="margin:.75rem 0;justify-content:flex-end">
+    {{template "csrf" .}}
+    <input type="hidden" name="month" value="{{.YearMonth}}">
+    <button class="btn btn-sm btn-ghost" type="submit">Copy previous month</button>
+  </form>
+
+  <form method="post" action="/plan/budgets" class="panel" style="margin-top:0">
+    {{template "csrf" .}}
+    <input type="hidden" name="month" value="{{.YearMonth}}">
+    <div class="spread" style="margin-bottom:.5rem">
+      <h2 style="margin:0">Category budgets</h2>
+      <button class="btn btn-primary btn-sm" type="submit">Save budgets</button>
+    </div>
+    <p class="tiny muted" style="margin:0 0 .75rem">
+      Parent mode is rollup (sum of children) or independent cap — never both counting the same spend.
+      Unused rollover is opt-in; overspend is absorbed at month end.
+    </p>
+    {{if not .BudgetLines}}
+    <p class="muted">No expense categories yet.</p>
+    {{else}}
+    <div class="budget-list">
+      {{range .BudgetLines}}
+      <div class="budget-row {{if .ParentID}}budget-child{{else}}budget-parent{{end}}">
+        <div class="budget-name">
+          <div style="font-weight:600">{{if .ParentName}}{{.ParentName}} › {{end}}{{.CategoryName}}</div>
+          <div class="tiny muted">
+            {{if .FixedFlexible}}{{.FixedFlexible}} · {{end}}
+            spent {{money .SpentCents $.Currency}}
+            {{if .RolloverCarry}} · +{{money .RolloverCarry $.Currency}} rollover{{end}}
+            · left {{money .Remaining $.Currency}}
+          </div>
+        </div>
+        <div class="budget-controls">
+          {{if .HasChildren}}
+          <select name="mode_{{.CategoryID}}" title="Parent budget mode">
+            <option value="rollup" {{if eq .BudgetMode "rollup"}}selected{{end}}>Rollup</option>
+            <option value="independent" {{if eq .BudgetMode "independent"}}selected{{end}}>Independent</option>
+          </select>
+          {{end}}
+          <input name="amount_{{.CategoryID}}" inputmode="decimal" value="{{centsInput .BaseCents}}"
+                 {{if and .HasChildren (eq .BudgetMode "rollup")}}placeholder="(from children)"{{end}}
+                 aria-label="Budget for {{.CategoryName}}">
+          <label class="check tiny"><input type="checkbox" name="rollover_{{.CategoryID}}" {{if .Rollover}}checked{{end}}> Rollover</label>
+        </div>
+      </div>
+      {{end}}
+    </div>
+    <button class="btn btn-primary btn-block" type="submit" style="margin-top:1rem">Save budgets</button>
+    {{end}}
+  </form>
+  {{end}}
+
+  {{if eq .PlanTab "bills"}}
+  <div class="panel" style="margin-top:.75rem">
+    <div class="spread">
+      <h2 style="margin:0">Next 14 days</h2>
+      <span class="tiny faint">{{len .Bills}} item{{if ne (len .Bills) 1}}s{{end}}</span>
+    </div>
+    {{if not .Bills}}
+    <p class="muted small" style="margin:.75rem 0 0">No bills in this window.</p>
+    {{else}}
+      {{range .Bills}}
+      <div class="list-row">
+        <div>
+          <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}{{.TemplateName}}{{end}}</div>
+          <div class="tiny muted">
+            {{.DueDate}} · <span class="chip {{if eq .Status "overdue"}}chip-danger{{else if eq .Status "matched"}}chip-ok{{else if eq .Status "skipped"}}{{else}}chip-warn{{end}}">{{.Status}}</span>
+            {{if .AccountName}} · {{.AccountName}}{{end}}
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-variant-numeric:tabular-nums;font-weight:650">{{money .ExpectedAmount $.Currency}}</div>
+          {{if or (eq .Status "upcoming") (eq .Status "overdue")}}
+          <div class="row" style="justify-content:flex-end;gap:.35rem;margin-top:.35rem">
+            <form method="post" action="/schedules/instances/{{.ID}}/paid">
+              {{template "csrf" $}}
+              <input type="hidden" name="return" value="/plan?tab=bills&month={{$.YearMonth}}">
+              <button class="btn btn-sm btn-primary" type="submit">Paid</button>
+            </form>
+            <form method="post" action="/schedules/instances/{{.ID}}/skip">
+              {{template "csrf" $}}
+              <input type="hidden" name="return" value="/plan?tab=bills&month={{$.YearMonth}}">
+              <button class="btn btn-sm btn-ghost" type="submit">Skip</button>
+            </form>
+          </div>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+    {{end}}
+  </div>
+
+  <form method="post" action="/schedules" class="panel stack" style="margin-top:.75rem">
+    {{template "csrf" .}}
+    <h2 style="margin:0">Add recurring bill</h2>
+    <div class="field"><label>Name</label><input name="name" required maxlength="80" placeholder="Rent"></div>
+    <div class="field"><label>Payee</label><input name="payee" maxlength="120" placeholder="Same as name if blank"></div>
+    <div class="row" style="align-items:flex-end">
+      <div class="field grow"><label>Amount</label><input name="amount" inputmode="decimal" required placeholder="0.00"></div>
+      <div class="field grow"><label>Kind</label>
+        <select name="kind"><option value="expense">Expense</option><option value="income">Income</option></select>
+      </div>
+    </div>
+    <div class="row" style="align-items:flex-end">
+      <div class="field grow"><label>Frequency</label>
+        <select name="frequency">
+          <option value="monthly">Monthly</option>
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Every 2 weeks</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+      <div class="field grow"><label>Next due</label><input type="date" name="next_due" required value="{{today}}"></div>
+    </div>
+    <div class="row" style="align-items:flex-end">
+      <div class="field grow"><label>Account</label>
+        <select name="account_id">
+          <option value="">Any</option>
+          {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field grow"><label>Category</label>
+        <select name="category_id">
+          <option value="">—</option>
+          {{range .Categories}}
+          {{if eq .Kind "expense"}}
+          <option value="{{.ID}}">{{if .ParentName}}{{.ParentName}} › {{end}}{{.Name}}</option>
+          {{end}}
+          {{end}}
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Add schedule</button>
+  </form>
+
+  {{if .Schedules}}
+  <div class="panel" style="margin-top:.75rem">
+    <h2 style="margin:0 0 .5rem">Active schedules</h2>
+    {{range .Schedules}}
+    <div class="list-row">
+      <div>
+        <div style="font-weight:600">{{.Name}}</div>
+        <div class="tiny muted">{{.Frequency}} · next {{.NextDue}} · {{money .AmountCents $.Currency}}</div>
+      </div>
+      <form method="post" action="/schedules/{{.ID}}/deactivate">
+        {{template "csrf" $}}
+        <button class="btn btn-sm btn-ghost" type="submit">Remove</button>
+      </form>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if .Suggestions}}
+  <div class="panel" style="margin-top:.75rem">
+    <h2 style="margin:0 0 .35rem">Suggested from history</h2>
+    <p class="tiny muted" style="margin:0 0 .75rem">Payees that look monthly. Accept to create a schedule.</p>
+    {{range .Suggestions}}
+    <form method="post" action="/schedules/suggest" class="list-row" style="align-items:flex-start">
+      {{template "csrf" $}}
+      <div class="grow">
+        <div style="font-weight:600">{{.PayeeName}}</div>
+        <div class="tiny muted">~{{money .AmountCents $.Currency}} · {{.Occurrences}}× · last {{.LastDate}}</div>
+        <input type="hidden" name="name" value="{{.PayeeName}}">
+        <input type="hidden" name="payee" value="{{.PayeeName}}">
+        <input type="hidden" name="amount" value="{{centsInput .AmountCents}}">
+        <input type="hidden" name="next_due" value="{{.LastDate}}">
+        {{if .AccountID}}<input type="hidden" name="account_id" value="{{ptrID .AccountID}}">{{end}}
+        {{if .CategoryID}}<input type="hidden" name="category_id" value="{{ptrID .CategoryID}}">{{end}}
+      </div>
+      <button class="btn btn-sm btn-primary" type="submit">Add</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+  {{end}}
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

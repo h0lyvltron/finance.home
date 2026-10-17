@@ -86,6 +86,16 @@ type pageData struct {
 	ShowChart    bool
 	DrillBase    string
 	QueryString  string
+	// plan / home (slice 4)
+	PlanTab      string
+	YearMonth    string
+	BudgetLines  []models.BudgetLine
+	BudgetHealth models.BudgetHealth
+	LeftToSpend  models.LeftToSpend
+	Bills        []models.ScheduleInstance
+	Schedules    []models.ScheduleTemplate
+	Suggestions  []models.RecurringSuggestion
+	Insights     []models.CoachingInsight
 }
 
 type reconcileResult struct {
@@ -144,6 +154,15 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /logout", a.logout)
 
 	mux.HandleFunc("GET /{$}", a.requireAuth(a.home))
+	mux.HandleFunc("GET /plan", a.requireAuth(a.planPage))
+	mux.HandleFunc("POST /plan/settings", a.requireAuth(a.csrf(a.planSettingsPost)))
+	mux.HandleFunc("POST /plan/budgets", a.requireAuth(a.csrf(a.planBudgetsPost)))
+	mux.HandleFunc("POST /plan/budgets/copy", a.requireAuth(a.csrf(a.planCopyMonth)))
+	mux.HandleFunc("POST /schedules", a.requireAuth(a.csrf(a.scheduleCreate)))
+	mux.HandleFunc("POST /schedules/{id}/deactivate", a.requireAuth(a.csrf(a.scheduleDeactivate)))
+	mux.HandleFunc("POST /schedules/instances/{id}/paid", a.requireAuth(a.csrf(a.scheduleMarkPaid)))
+	mux.HandleFunc("POST /schedules/instances/{id}/skip", a.requireAuth(a.csrf(a.scheduleSkip)))
+	mux.HandleFunc("POST /schedules/suggest", a.requireAuth(a.csrf(a.scheduleSuggestAccept)))
 	mux.HandleFunc("GET /accounts", a.requireAuth(a.accountsList))
 	mux.HandleFunc("GET /accounts/new", a.requireAuth(a.accountNew))
 	mux.HandleFunc("POST /accounts", a.requireAuth(a.csrf(a.accountCreate)))

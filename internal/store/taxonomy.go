@@ -11,7 +11,8 @@ import (
 
 func (s *Store) ListCategories(kind string, includeArchived bool) ([]models.Category, error) {
 	q := `SELECT c.id, c.name, c.kind, c.parent_id, COALESCE(c.fixed_flexible,''), COALESCE(c.color,''),
-		c.exclude_budget, c.protected, c.archived, c.display_order, COALESCE(p.name,'')
+		c.exclude_budget, c.protected, c.archived, c.display_order, COALESCE(p.name,''),
+		COALESCE(c.budget_mode,'rollup')
 		FROM categories c LEFT JOIN categories p ON p.id = c.parent_id WHERE 1=1`
 	args := []any{}
 	if kind != "" {
@@ -33,7 +34,7 @@ func (s *Store) ListCategories(kind string, includeArchived bool) ([]models.Cate
 		var parent sql.NullInt64
 		var excl, prot, arch int
 		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &parent, &c.FixedFlexible, &c.Color,
-			&excl, &prot, &arch, &c.DisplayOrder, &c.ParentName); err != nil {
+			&excl, &prot, &arch, &c.DisplayOrder, &c.ParentName, &c.BudgetMode); err != nil {
 			return nil, err
 		}
 		if parent.Valid {
@@ -43,6 +44,9 @@ func (s *Store) ListCategories(kind string, includeArchived bool) ([]models.Cate
 		c.ExcludeBudget = excl == 1
 		c.Protected = prot == 1
 		c.Archived = arch == 1
+		if c.BudgetMode == "" {
+			c.BudgetMode = "rollup"
+		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -53,8 +57,9 @@ func (s *Store) GetCategory(id int64) (*models.Category, error) {
 	var parent sql.NullInt64
 	var excl, prot, arch int
 	err := s.DB.QueryRow(`SELECT id, name, kind, parent_id, COALESCE(fixed_flexible,''), COALESCE(color,''),
-		exclude_budget, protected, archived, display_order FROM categories WHERE id=?`, id).
-		Scan(&c.ID, &c.Name, &c.Kind, &parent, &c.FixedFlexible, &c.Color, &excl, &prot, &arch, &c.DisplayOrder)
+		exclude_budget, protected, archived, display_order, COALESCE(budget_mode,'rollup')
+		FROM categories WHERE id=?`, id).
+		Scan(&c.ID, &c.Name, &c.Kind, &parent, &c.FixedFlexible, &c.Color, &excl, &prot, &arch, &c.DisplayOrder, &c.BudgetMode)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +70,18 @@ func (s *Store) GetCategory(id int64) (*models.Category, error) {
 	c.ExcludeBudget = excl == 1
 	c.Protected = prot == 1
 	c.Archived = arch == 1
+	if c.BudgetMode == "" {
+		c.BudgetMode = "rollup"
+	}
 	return c, nil
+}
+
+func (s *Store) SetCategoryBudgetMode(id int64, mode string) error {
+	if mode != "rollup" && mode != "independent" {
+		return fmt.Errorf("budget_mode must be rollup or independent")
+	}
+	_, err := s.DB.Exec(`UPDATE categories SET budget_mode=? WHERE id=?`, mode, id)
+	return err
 }
 
 func (s *Store) CategoryByKindName(kind, name string) (*models.Category, error) {

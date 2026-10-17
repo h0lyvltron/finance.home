@@ -17,38 +17,107 @@
   {{template "topbar" .}}
   {{template "flash" .}}
 
-  <section class="stack" style="margin-top:.5rem">
-    <div>
-      <p class="tiny faint">Net across accounts</p>
-      <h1 style="font-size:2rem">{{money .NetWorth .Currency}}</h1>
-      <p class="muted small">Balances from anchors + posted activity. Full Home widgets arrive in a later slice.</p>
+  <section class="stack home-curated" style="margin-top:.35rem">
+    <div class="home-hero">
+      <p class="tiny faint">Left to spend · {{.YearMonth}}</p>
+      <h1 class="home-lts {{if lt .LeftToSpend.Amount 0}}neg{{else}}pos{{end}}">{{money .LeftToSpend.Amount .Currency}}</h1>
+      <p class="muted small home-lts-breakdown">
+        {{money .LeftToSpend.ExpectedIncome .Currency}} income
+        − {{money .LeftToSpend.FixedBills .Currency}} bills
+        − {{money .LeftToSpend.FlexibleSpent .Currency}} flexible
+        − {{money .LeftToSpend.SavingsTarget .Currency}} savings
+      </p>
+      <a class="btn btn-sm btn-ghost" href="/plan?month={{.YearMonth}}">Adjust plan</a>
+    </div>
+
+    {{if .Insights}}
+    <div class="panel insights-panel">
+      <div class="spread">
+        <h2 style="margin:0">Insights</h2>
+        <span class="tiny faint">Up to 3</span>
+      </div>
+      {{range .Insights}}
+      <a class="insight insight-{{.Tone}}" href="{{.Href}}">
+        <div>
+          <div class="insight-title">{{.Title}}</div>
+          <div class="tiny muted">{{.Detail}}</div>
+        </div>
+        <span class="faint">›</span>
+      </a>
+      {{end}}
+    </div>
+    {{end}}
+
+    <div class="panel">
+      <div class="spread">
+        <h2 style="margin:0">Budget health</h2>
+        <a class="btn btn-sm btn-ghost" href="/plan?month={{.YearMonth}}&tab=budgets">Plan</a>
+      </div>
+      {{if and (eq .BudgetHealth.Budgeted 0) (eq .BudgetHealth.Spent 0)}}
+      <p class="muted small" style="margin:.75rem 0 0">Set category targets on Plan to track pace.</p>
+      {{else}}
+      <div class="health-grid">
+        <div>
+          <div class="tiny faint">Spent</div>
+          <div class="num-strong">{{money .BudgetHealth.Spent .Currency}}</div>
+        </div>
+        <div>
+          <div class="tiny faint">Budgeted</div>
+          <div class="num-strong">{{money .BudgetHealth.Budgeted .Currency}}</div>
+        </div>
+        <div>
+          <div class="tiny faint">Over</div>
+          <div class="num-strong {{if gt .BudgetHealth.OverCents 0}}neg{{end}}">{{money .BudgetHealth.OverCents .Currency}}</div>
+        </div>
+      </div>
+      <p class="tiny muted" style="margin:.65rem 0 0">
+        {{.BudgetHealth.OverCount}} over · {{.BudgetHealth.OnTrackCount}} on track · {{.BudgetHealth.UnderCount}} under
+      </p>
+      {{end}}
     </div>
 
     <div class="panel">
       <div class="spread">
-        <h2 style="margin:0">Accounts</h2>
-        <a class="btn btn-sm btn-ghost" href="/accounts">All</a>
+        <h2 style="margin:0">Bills · next 14 days</h2>
+        <a class="btn btn-sm btn-ghost" href="/plan?tab=bills">All</a>
       </div>
-      {{if not .Accounts}}
-      <div class="empty" style="padding:1.25rem 0">
-        <p>Add a checking or cash account to start capturing.</p>
-        <a class="btn btn-primary" href="/accounts/new">Add account</a>
-      </div>
+      {{if not .Bills}}
+      <p class="muted small" style="margin:.75rem 0 0">No upcoming bills. Add schedules on Plan.</p>
       {{else}}
-      <div class="table-list">
-        {{range .Accounts}}
-        <a class="list-row" href="/accounts/{{.ID}}" style="color:inherit;text-decoration:none">
+        {{range .Bills}}
+        <div class="list-row bill-row">
           <div>
-            <div style="font-weight:600">{{.Name}}</div>
-            <div class="tiny muted">{{accountTypeLabel .Type}} · {{ownerLabel .Owner $.NameA $.NameB}}</div>
+            <div style="font-weight:600">{{if .PayeeName}}{{.PayeeName}}{{else}}{{.TemplateName}}{{end}}</div>
+            <div class="tiny muted">
+              {{.DueDate}}
+              · <span class="chip {{if eq .Status "overdue"}}chip-danger{{else if eq .Status "matched"}}chip-ok{{else}}chip-warn{{end}}">{{.Status}}</span>
+              {{if .CategoryName}} · {{.CategoryName}}{{end}}
+            </div>
           </div>
-          <div style="font-variant-numeric:tabular-nums;font-weight:650">
-            {{if .IsLiability}}{{moneyAbs .Balance $.Currency}} owed{{else}}{{money .Balance $.Currency}}{{end}}
+          <div class="bill-actions">
+            <div style="font-variant-numeric:tabular-nums;font-weight:650;text-align:right">{{money .ExpectedAmount $.Currency}}</div>
+            {{if or (eq .Status "upcoming") (eq .Status "overdue")}}
+            <form method="post" action="/schedules/instances/{{.ID}}/paid" class="row" style="justify-content:flex-end;gap:.35rem;margin-top:.25rem">
+              {{template "csrf" $}}
+              <input type="hidden" name="return" value="/">
+              <button class="btn btn-sm btn-primary" type="submit">Paid</button>
+            </form>
+            {{end}}
           </div>
-        </a>
+        </div>
         {{end}}
-      </div>
       {{end}}
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <h2 style="margin:0">Net worth</h2>
+        <a class="btn btn-sm btn-ghost" href="/accounts">Accounts</a>
+      </div>
+      <p class="report-total" style="margin:.5rem 0 0">{{money .NetWorth .Currency}}</p>
+      <p class="tiny muted">Across {{len .Accounts}} account{{if ne (len .Accounts) 1}}s{{end}}
+        {{if .ReviewCount}} · <a href="/review">{{.ReviewCount}} need review</a>{{end}}
+      </p>
     </div>
 
     <div class="panel">

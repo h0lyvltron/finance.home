@@ -10,12 +10,21 @@ import (
 
 func (s *Store) Household() (*models.Household, error) {
 	h := &models.Household{}
-	err := s.DB.QueryRow(`SELECT id, name, currency, timezone, week_starts FROM households WHERE id = 1`).
-		Scan(&h.ID, &h.Name, &h.Currency, &h.Timezone, &h.WeekStarts)
+	err := s.DB.QueryRow(`SELECT id, name, currency, timezone, week_starts,
+		COALESCE(expected_income_cents,0), COALESCE(savings_target_cents,0)
+		FROM households WHERE id = 1`).
+		Scan(&h.ID, &h.Name, &h.Currency, &h.Timezone, &h.WeekStarts,
+			&h.ExpectedIncomeCents, &h.SavingsTargetCents)
 	if err != nil {
 		return nil, err
 	}
 	return h, nil
+}
+
+func (s *Store) UpdateHouseholdPlan(expectedIncome, savingsTarget int64) error {
+	_, err := s.DB.Exec(`UPDATE households SET expected_income_cents=?, savings_target_cents=? WHERE id=1`,
+		expectedIncome, savingsTarget)
+	return err
 }
 
 func (s *Store) People() ([]models.Person, error) {

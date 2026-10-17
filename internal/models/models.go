@@ -1,11 +1,13 @@
 package models
 
 type Household struct {
-	ID        int64
-	Name      string
-	Currency  string
-	Timezone  string
-	WeekStarts int
+	ID                  int64
+	Name                string
+	Currency            string
+	Timezone            string
+	WeekStarts          int
+	ExpectedIncomeCents int64 // monthly expected income for left-to-spend
+	SavingsTargetCents  int64 // monthly savings contribution target
 }
 
 type Person struct {
@@ -44,6 +46,7 @@ type Category struct {
 	Archived      bool
 	DisplayOrder  int
 	ParentName    string
+	BudgetMode    string // rollup | independent (parents)
 }
 
 type Tag struct {
@@ -175,4 +178,97 @@ type StagingRow struct {
 type ReviewItem struct {
 	Transaction
 	RuleHint string
+}
+
+// BudgetLine is a resolved monthly budget row (defaults + override + rollover).
+type BudgetLine struct {
+	CategoryID   int64
+	CategoryName string
+	ParentID     *int64
+	ParentName   string
+	FixedFlexible string
+	BudgetMode   string // rollup | independent
+	IsParent     bool
+	HasChildren  bool
+	AmountCents  int64 // effective target after rollover
+	BaseCents    int64 // target before rollover carry
+	Rollover     bool
+	RolloverCarry int64
+	SpentCents   int64 // positive magnitude of expense
+	Remaining    int64 // Amount - Spent
+	ExcludeBudget bool
+	Color        string
+}
+
+type ScheduleTemplate struct {
+	ID                   int64
+	Name                 string
+	PayeeName            string
+	AmountCents          int64
+	Kind                 string // expense | income
+	AccountID            *int64
+	AccountName          string
+	CategoryID           *int64
+	CategoryName         string
+	Frequency            string
+	IntervalN            int
+	NextDue              string
+	AutoMatch            bool
+	AmountToleranceCents int64
+	DateWindowDays       int
+	Active               bool
+}
+
+type ScheduleInstance struct {
+	ID              int64
+	TemplateID      int64
+	TemplateName    string
+	PayeeName       string
+	DueDate         string
+	ExpectedAmount  int64
+	Status          string // upcoming|matched|skipped|overdue
+	MatchedTxID     *int64
+	Kind            string
+	CategoryName    string
+	AccountName     string
+	DaysUntil       int
+}
+
+type CoachingInsight struct {
+	Kind     string // pace|review|bills|positive
+	Tone     string // warn|ok|info
+	Title    string
+	Detail   string
+	Href     string
+	Amount   int64 // optional cents for display
+	ShowAmt  bool
+}
+
+type LeftToSpend struct {
+	ExpectedIncome int64
+	FixedBills     int64
+	FlexibleSpent  int64
+	SavingsTarget  int64
+	Amount         int64 // income - fixed - flexible - savings
+	YearMonth      string
+}
+
+type BudgetHealth struct {
+	OverCount    int
+	UnderCount   int
+	OnTrackCount int
+	OverCents    int64 // total overspend
+	UnderCents   int64 // total underspend
+	Budgeted     int64
+	Spent        int64
+}
+
+type RecurringSuggestion struct {
+	PayeeName   string
+	AmountCents int64
+	Frequency   string // monthly heuristic
+	Occurrences int
+	LastDate    string
+	CategoryID  *int64
+	AccountID   *int64
 }
