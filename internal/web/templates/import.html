@@ -120,9 +120,10 @@
           <option value="|">Pipe</option>
         </select>
       </div>
-      <div class="field">
-        <label><input type="checkbox" name="has_header" value="1" checked> First row is header</label>
-      </div>
+      <label class="check">
+        <input type="checkbox" name="has_header" value="1" {{if .Guess.HasHeader}}checked{{end}}>
+        <span>First row is a header</span>
+      </label>
       <div class="field">
         <label for="date_column">Date column</label>
         <select id="date_column" name="date_column" required>
@@ -193,9 +194,10 @@
           {{end}}
         </select>
       </div>
-      <div class="field">
-        <label><input type="checkbox" name="invert_sign" value="1"> Invert signs (some credit-card exports)</label>
-      </div>
+      <label class="check">
+        <input type="checkbox" name="invert_sign" value="1">
+        <span>Invert signs (some credit-card exports)</span>
+      </label>
     </div>
 
     <button class="btn btn-primary btn-block" type="submit">Build preview</button>
@@ -256,10 +258,10 @@
     {{template "csrf" .}}
     <div class="spread" style="margin-bottom:.75rem">
       <div class="row">
-        <label class="row tiny" style="gap:.35rem">
+        <label class="check">
           <input type="checkbox" aria-label="Select all rows on this page"
             onchange="this.form.querySelectorAll('input[name=row_id]').forEach(c => c.checked = this.checked)">
-          Select all
+          <span>Select all</span>
         </label>
         <button type="button" class="btn btn-sm btn-primary" data-cat-selected data-batch="{{.Batch.ID}}">Categorize selected…</button>
         <select name="bulk_action">
@@ -273,9 +275,10 @@
 
     {{range .StagingRows}}
     <article class="tx-card import-row">
-      <div style="display:flex;gap:.5rem;align-items:flex-start">
-        <input type="checkbox" name="row_id" value="{{.ID}}" style="margin-top:.35rem">
-        <div>
+      <label class="check import-select">
+        <input type="checkbox" name="row_id" value="{{.ID}}" aria-label="Select this row">
+      </label>
+      <div>
           <div class="tx-payee">{{if .RenamePayee}}{{.RenamePayee}} <span class="tiny muted">(was {{.PayeeName}})</span>{{else if .PayeeName}}{{.PayeeName}}{{else}}(no payee){{end}}</div>
           <div class="tx-meta">
             {{.TransactionDate}} · row {{add .RowIndex 1}}
@@ -291,7 +294,6 @@
             <span class="chip">{{.Action}}</span>
             <a class="tiny" href="/import/{{$.Batch.ID}}/preview?page={{$.Page}}{{if $.ExceptionsOnly}}&exceptions=1{{end}}&row={{.ID}}">Open drawer</a>
           </div>
-        </div>
       </div>
       {{if .Exception}}<div class="tx-amount muted">—</div>
       {{else}}<div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>{{end}}

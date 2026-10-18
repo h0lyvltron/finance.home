@@ -139,6 +139,22 @@ h3 { font-size: 1.05rem; }
   padding: .7rem .8rem;
   width: 100%;
 }
+.field label:has(input[type="checkbox"]),
+.field label:has(input[type="radio"]) {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: .9rem;
+  color: var(--ink);
+}
+.field input[type="checkbox"],
+.field input[type="radio"] {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
 .field textarea { min-height: 5rem; resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
@@ -402,8 +418,43 @@ h3 { font-size: 1.05rem; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .65rem 0; }
 .chip-active { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .check-grid { display: flex; flex-direction: column; gap: .35rem; }
-.check { display: flex; align-items: center; gap: .5rem; font-size: .9rem; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 500; }
+.check { display: flex; align-items: flex-start; gap: .5rem; font-size: .9rem; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 500; }
 .check input { width: auto; }
+.check input[type="checkbox"] {
+  appearance: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: .15rem 0 0;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 4px;
+  background: var(--bg);
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+}
+.check input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check input[type="checkbox"]:checked::after {
+  content: "";
+  width: .28rem;
+  height: .5rem;
+  border: solid var(--accent-ink);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.check input[type="checkbox"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.tx-card.import-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: .65rem;
+}
+.import-select { margin-top: .15rem; }
 .scroll-checks { max-height: 9rem; overflow: auto; padding-right: .25rem; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .5rem .65rem; background: var(--bg); }
 .filter-save { margin-top: .75rem; }
 .saved-list { list-style: none; padding: 0; margin: .5rem 0 0; }

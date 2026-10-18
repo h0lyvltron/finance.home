@@ -20,7 +20,7 @@ type CreateBatchInput struct {
 
 func (s *Store) CreateImportBatch(in CreateBatchInput) (int64, error) {
 	delim := importcsv.DetectDelimiter(in.RawCSV)
-	headers, _, err := importcsv.DetectHeaders(strings.NewReader(in.RawCSV), delim, true)
+	headers, _, _, err := importcsv.Read(strings.NewReader(in.RawCSV), delim)
 	if err != nil {
 		return 0, err
 	}
@@ -109,13 +109,13 @@ func (s *Store) BatchRawCSV(id int64) (string, error) {
 
 // BatchHeaders detects headers from the stored CSV with the current parser;
 // headers_json is only a snapshot from upload time.
-func (s *Store) BatchHeaders(id int64) ([]string, error) {
+func (s *Store) BatchHeaders(id int64) ([]string, bool, error) {
 	raw, err := s.BatchRawCSV(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	headers, _, err := importcsv.DetectHeaders(strings.NewReader(raw), importcsv.DetectDelimiter(raw), true)
-	return headers, err
+	headers, _, hasHeader, err := importcsv.Read(strings.NewReader(raw), importcsv.DetectDelimiter(raw))
+	return headers, hasHeader, err
 }
 
 // CancelImportBatch discards a batch that hasn't been committed (staging rows cascade).
@@ -314,12 +314,12 @@ func toImportProfile(prof models.MappingProfile) importcsv.Profile {
 
 // MatchingProfile picks the saved profile that fits headers best: every mapped
 // column must exist; more mapped columns wins, then the most recent.
-func MatchingProfile(profiles []models.MappingProfile, headers []string) *models.MappingProfile {
+func MatchingProfile(profiles []models.MappingProfile, headers []string, hasHeader bool) *models.MappingProfile {
 	var best *models.MappingProfile
 	bestScore := 0
 	for i := range profiles {
 		p := profiles[i]
-		if p.DateColumn == "" || !p.HasHeader {
+		if p.DateColumn == "" || p.HasHeader != hasHeader {
 			continue
 		}
 		ip := toImportProfile(p)
@@ -481,11 +481,11 @@ func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 }
 
 type StagingFilter struct {
-	BatchID      int64
-	Page         int
-	PageSize     int
+	BatchID        int64
+	Page           int
+	PageSize       int
 	ExceptionsOnly bool
-	Action       string
+	Action         string
 }
 
 func (s *Store) ListStagingRows(f StagingFilter) ([]models.StagingRow, int, error) {

@@ -81,12 +81,15 @@ func (a *App) renderImportMap(w http.ResponseWriter, r *http.Request, sess *auth
 	d.Batch = b
 	profiles, _ := a.Store.ListMappingProfiles()
 	d.Profiles = profiles
-	if headers, err := a.Store.BatchHeaders(id); err == nil {
+	hasHeader := true
+	if headers, header, err := a.Store.BatchHeaders(id); err == nil {
 		b.Headers = headers
+		hasHeader = header
 	}
 	d.Headers = b.Headers
 	g := importGuess{Profile: importcsv.GuessColumns(b.Headers)}
-	if mp := store.MatchingProfile(profiles, b.Headers); mp != nil {
+	g.HasHeader = hasHeader
+	if mp := store.MatchingProfile(profiles, b.Headers, hasHeader); mp != nil {
 		g.ProfileID, g.ProfileName = mp.ID, mp.Name
 		if mp.AccountID != nil {
 			g.AccountID = *mp.AccountID
@@ -108,6 +111,15 @@ type importGuess struct {
 	AccountID   int64
 }
 
+func formChecked(r *http.Request, name string) bool {
+	for _, v := range r.Form[name] {
+		if v == "1" || v == "on" || v == "true" {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) importMapPost(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	_ = r.ParseForm()
@@ -125,7 +137,7 @@ func (a *App) importMapPost(w http.ResponseWriter, r *http.Request, sess *auth.S
 	}
 	if profileID == 0 {
 		invert := r.FormValue("invert_sign") == "1"
-		hasHeader := r.FormValue("has_header") != "0"
+		hasHeader := formChecked(r, "has_header")
 		var acctPtr *int64
 		acctPtr = &acctID
 		in.Profile = store.MappingProfileInput{

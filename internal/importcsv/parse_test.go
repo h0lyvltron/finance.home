@@ -277,3 +277,63 @@ func TestGuessColumnsBankExport(t *testing.T) {
 		t.Fatalf("row0 %+v", parsed[0])
 	}
 }
+
+func TestHeaderlessCreditUnion(t *testing.T) {
+	auto := "10/03/2026,\"Finance Charge/Fee: $99.24, Loan Payment\",,637.76\n" +
+		"09/03/2026,\"Finance Charge/Fee: $10.00, Loan Payment\",,100.00\n"
+	headers, rows, hasHeader, err := Read(strings.NewReader(auto), ',')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasHeader {
+		t.Fatal("loan export should have no header")
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows %d", len(rows))
+	}
+	if headers[0] != "Date" || headers[1] != "Description" || headers[3] != "Amount" {
+		t.Fatalf("headers %q", headers)
+	}
+	g := GuessColumns(headers)
+	g.HasHeader = false
+	parsed := ParseRows(headers, rows, g)
+	if len(parsed) != 2 || parsed[0].Error != "" {
+		t.Fatalf("parsed %+v", parsed)
+	}
+	if parsed[0].Date != "2026-10-03" || parsed[0].Amount != 63776 || !strings.Contains(parsed[0].Payee, "Loan Payment") {
+		t.Fatalf("first row dropped or misread: %+v", parsed[0])
+	}
+
+	checking := "10/16/2026,WITHDRAWAL GROCERY,,-12.34\n" +
+		"09/29/2026,CHECK # 1386 ,1386,-300.00\n" +
+		"09/30/2026,Deposit PAYROLL,,2423.27\n"
+	headers, rows, hasHeader, err = Read(strings.NewReader(checking), ',')
+	if err != nil || hasHeader {
+		t.Fatalf("has=%v err=%v", hasHeader, err)
+	}
+	if headers[2] != "Check" {
+		t.Fatalf("headers %q", headers)
+	}
+	g = GuessColumns(headers)
+	g.HasHeader = false
+	parsed = ParseRows(headers, rows, g)
+	if len(parsed) != 3 {
+		t.Fatalf("len %d", len(parsed))
+	}
+	if parsed[0].Amount != -1234 || parsed[0].Payee != "WITHDRAWAL GROCERY" {
+		t.Fatalf("spend %+v", parsed[0])
+	}
+	if parsed[1].Amount != -30000 || parsed[1].Notes != "1386" {
+		t.Fatalf("check %+v", parsed[1])
+	}
+	if parsed[2].Amount != 242327 {
+		t.Fatalf("deposit %+v", parsed[2])
+	}
+
+	headed := "Transaction Date,Posted Date,Card No.,Description,Category,Debit,Credit\n" +
+		"2026-10-11,2026-10-13,6897,STARLINK,Phone,140.00,\n"
+	headers, _, hasHeader, err = Read(strings.NewReader(headed), ',')
+	if err != nil || !hasHeader || headers[0] != "Transaction Date" || headers[5] != "Debit" {
+		t.Fatalf("headed sniff headers=%q has=%v err=%v", headers, hasHeader, err)
+	}
+}

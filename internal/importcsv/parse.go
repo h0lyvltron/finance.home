@@ -29,17 +29,44 @@ type Profile struct {
 }
 
 type ParsedRow struct {
-	Index   int
-	Raw     map[string]string
-	Date    string
-	Amount  int64
-	Payee   string
-	Notes   string
-	Error   string
+	Index  int
+	Raw    map[string]string
+	Date   string
+	Amount int64
+	Payee  string
+	Notes  string
+	Error  string
 }
 
-// DetectHeaders reads the first record as headers (or synthesizes col_N).
+// Read splits a CSV and decides whether the first content row is a header.
+// Headerless files get column names from the values (Date, Description, Check, Amount).
+func Read(r io.Reader, delim rune) (headers []string, rows [][]string, hasHeader bool, err error) {
+	all, err := readAll(r, delim)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if len(all) == 0 {
+		return nil, nil, false, fmt.Errorf("empty CSV")
+	}
+	hasHeader = sniffHasHeader(all)
+	headers, rows = splitHeader(all, hasHeader)
+	return headers, rows, hasHeader, nil
+}
+
+// DetectHeaders reads the first record as headers, or names columns from the data when hasHeader is false.
 func DetectHeaders(r io.Reader, delim rune, hasHeader bool) ([]string, [][]string, error) {
+	all, err := readAll(r, delim)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(all) == 0 {
+		return nil, nil, fmt.Errorf("empty CSV")
+	}
+	headers, rows := splitHeader(all, hasHeader)
+	return headers, rows, nil
+}
+
+func readAll(r io.Reader, delim rune) ([][]string, error) {
 	if delim == 0 {
 		delim = ','
 	}
@@ -48,29 +75,113 @@ func DetectHeaders(r io.Reader, delim rune, hasHeader bool) ([]string, [][]strin
 	cr.FieldsPerRecord = -1
 	cr.LazyQuotes = true
 	cr.TrimLeadingSpace = true
+	return cr.ReadAll()
+}
 
-	all, err := cr.ReadAll()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(all) == 0 {
-		return nil, nil, fmt.Errorf("empty CSV")
-	}
-	var headers []string
-	var rows [][]string
+func splitHeader(all [][]string, hasHeader bool) ([]string, [][]string) {
 	if hasHeader {
 		start := headerRowIndex(all)
-		headers = normalizeHeaders(all[start])
-		rows = all[start+1:]
-	} else {
-		n := len(all[0])
-		headers = make([]string, n)
-		for i := 0; i < n; i++ {
-			headers[i] = fmt.Sprintf("col_%d", i+1)
-		}
-		rows = all
+		return normalizeHeaders(all[start]), all[start+1:]
 	}
-	return headers, rows, nil
+	return synthesizeHeaders(all), all
+}
+
+// sniffHasHeader reports whether the first real row is labels rather than a transaction.
+// Credit-union exports often start straight in with a date and have no header line.
+func sniffHasHeader(all [][]string) bool {
+	row := all[0]
+	for _, r := range all {
+		if nonEmptyCount(r) >= 2 {
+			row = r
+			break
+		}
+	}
+	if len(row) == 0 {
+		return true
+	}
+	first := strings.TrimSpace(strings.TrimPrefix(row[0], "\ufeff"))
+	if first == "" {
+		return true
+	}
+	if _, err := ParseDate(first, "auto"); err == nil {
+		return false
+	}
+	return true
+}
+
+func synthesizeHeaders(rows [][]string) []string {
+	n := 0
+	for _, r := range rows {
+		if len(r) > n {
+			n = len(r)
+		}
+	}
+	labels := make([]string, n)
+	for i := 0; i < n; i++ {
+		labels[i] = columnLabel(rows, i)
+	}
+	return normalizeHeaders(labels)
+}
+
+func columnLabel(rows [][]string, idx int) string {
+	var dates, money, ints, text, seen int
+	for _, r := range rows {
+		if idx >= len(r) {
+			continue
+		}
+		switch cellKind(r[idx]) {
+		case "empty":
+		case "date":
+			seen++
+			dates++
+		case "money":
+			seen++
+			money++
+		case "int":
+			seen++
+			ints++
+		default:
+			seen++
+			text++
+		}
+	}
+	if seen == 0 {
+		return fmt.Sprintf("col_%d", idx+1)
+	}
+	if dates*2 >= seen {
+		return "Date"
+	}
+	if money*2 >= seen {
+		return "Amount"
+	}
+	if text == 0 && ints*2 >= seen {
+		return "Check"
+	}
+	if text > 0 {
+		return "Description"
+	}
+	return fmt.Sprintf("col_%d", idx+1)
+}
+
+func cellKind(s string) string {
+	s = strings.TrimSpace(strings.TrimPrefix(s, "\ufeff"))
+	if s == "" {
+		return "empty"
+	}
+	if _, err := ParseDate(s, "auto"); err == nil && !strings.Contains(s, ".") {
+		return "date"
+	}
+	raw := strings.TrimPrefix(s, "$")
+	raw = strings.TrimPrefix(raw, "(")
+	raw = strings.TrimSuffix(raw, ")")
+	raw = strings.ReplaceAll(raw, ",", "")
+	if _, err := money.ParseDecimal(raw); err == nil {
+		if strings.Contains(s, ".") || strings.HasPrefix(s, "-") || strings.HasPrefix(s, "(") || strings.HasPrefix(s, "$") {
+			return "money"
+		}
+		return "int"
+	}
+	return "text"
 }
 
 // headerRowIndex skips bank preamble lines (account number, balance, ...) that

@@ -293,7 +293,7 @@ func TestCapitalOneDebitCreditImport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		headers, err := s.BatchHeaders(batchID)
+		headers, _, err := s.BatchHeaders(batchID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -342,11 +342,11 @@ func TestCapitalOneDebitCreditImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	headers := []string{"Transaction Date", "Posted Date", "Card No.", "Description", "Category", "Debit", "Credit"}
-	mp := store.MatchingProfile(profiles, headers)
+	mp := store.MatchingProfile(profiles, headers, true)
 	if mp == nil || mp.Name != "Capital One" || mp.AmountMode != "debit_credit" || mp.AccountID == nil || *mp.AccountID != acctID {
 		t.Fatalf("saved profile not matched: %+v", mp)
 	}
-	if other := store.MatchingProfile(profiles, []string{"Date", "Description", "Amount"}); other != nil {
+	if other := store.MatchingProfile(profiles, []string{"Date", "Description", "Amount"}, true); other != nil {
 		t.Fatalf("unexpected match for other layout: %+v", other)
 	}
 
@@ -469,8 +469,8 @@ func TestMapRejectsStaleColumnsAndCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	headers, err := s.BatchHeaders(batchID)
-	if err != nil || len(headers) != 4 || headers[0] != "Transaction Date" {
+	headers, hasHeader, err := s.BatchHeaders(batchID)
+	if err != nil || !hasHeader || len(headers) != 4 || headers[0] != "Transaction Date" {
 		t.Fatalf("headers %q err %v", headers, err)
 	}
 	before, _ := s.ListMappingProfiles()
