@@ -108,8 +108,8 @@ func TestStagingUsualCategoryAndManualPick(t *testing.T) {
 		"2024-06-01,SP HUBMAN AND CHUBGI,-12.00\n"+
 		"2024-06-02,ANDERSONS,-8.00\n")
 	rows, _, _ := s.ListStagingRows(store.StagingFilter{BatchID: batch, PageSize: 10})
-	if rows[0].CategoryID == nil || *rows[0].CategoryID != catID || rows[0].MatchedRuleName != store.UsualCategoryLabel {
-		t.Fatalf("usual category not suggested: %+v", rows[0])
+	if rows[0].CategoryID == nil || *rows[0].CategoryID != catID || rows[0].MatchedRuleName != store.SuggestedCategoryLabel || !rows[0].NeedsReview {
+		t.Fatalf("one prior transaction should suggest, not auto-file: %+v", rows[0])
 	}
 	if rows[1].CategoryID != nil {
 		t.Fatalf("unexpected category on unknown merchant: %+v", rows[1])
@@ -278,6 +278,51 @@ func TestRuleViewsMisfiledApplyAndDeleteUndo(t *testing.T) {
 	}
 }
 
+func TestConfidentUsualSkipsReview(t *testing.T) {
+	s := setupStore(t)
+	acctID := ensureChecking(t, s)
+	catID := firstExpenseCat(t, s)
+	for _, p := range []string{"WL *STEAM PURCHASE", "STEAMGAMES.COM 4259522"} {
+		if _, err := s.CreateTransaction(store.TxInput{
+			AccountID: acctID, PayeeName: p, Amount: -999,
+			TransactionDate: "2024-05-01", CategoryID: &catID, CreatedBy: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch := importCSV(t, s, acctID, "Date,Description,Amount\n2024-06-01,STEAM PURCHASE 998877,-9.99\n")
+	rows, _, _ := s.ListStagingRows(store.StagingFilter{BatchID: batch, PageSize: 10})
+	if rows[0].CategoryID == nil || *rows[0].CategoryID != catID || rows[0].MatchedRuleName != store.UsualCategoryLabel || rows[0].NeedsReview {
+		t.Fatalf("confident steam match should auto-file: %+v", rows[0])
+	}
+}
+
+func TestSplitAmountHistoryStaysASuggestion(t *testing.T) {
+	s := setupStore(t)
+	acctID := ensureChecking(t, s)
+	groceries := firstExpenseCat(t, s)
+	shopping := secondExpenseCat(t, s, groceries)
+	for i := 0; i < 3; i++ {
+		if _, err := s.CreateTransaction(store.TxInput{
+			AccountID: acctID, PayeeName: "ANDERSONS", Amount: -2500 - int64(i*100),
+			TransactionDate: "2024-05-01", CategoryID: &groceries, CreatedBy: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreateTransaction(store.TxInput{
+			AccountID: acctID, PayeeName: "ANDERSONS", Amount: -2800 - int64(i*100),
+			TransactionDate: "2024-05-02", CategoryID: &shopping, CreatedBy: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch := importCSV(t, s, acctID, "Date,Description,Amount\n2024-06-01,ANDERSONS,-26.00\n")
+	rows, _, _ := s.ListStagingRows(store.StagingFilter{BatchID: batch, PageSize: 10})
+	if rows[0].MatchedRuleName != store.SuggestedCategoryLabel || !rows[0].NeedsReview {
+		t.Fatalf("overlapping amounts should not auto-file: %+v", rows[0])
+	}
+}
+
 func TestGroupForReviewMergesTruncatedNames(t *testing.T) {
 	cat := int64(7)
 	items := []models.Transaction{
@@ -291,5 +336,14 @@ func TestGroupForReviewMergesTruncatedNames(t *testing.T) {
 	}
 	if groups[0].CategoryName != "Gifts" || groups[0].Total != -300 {
 		t.Fatalf("group summary=%+v", groups[0])
+	}
+	steam := []models.Transaction{
+		{ID: 1, PayeeName: "WL *STEAM PURCHASE", Amount: -100},
+		{ID: 2, PayeeName: "STEAMGAMES.COM 4259522", Amount: -200},
+		{ID: 3, PayeeName: "COSTCO GAS", Amount: -50},
+	}
+	sg := store.GroupForReview(steam)
+	if len(sg) != 2 || len(sg[0].Items) != 2 {
+		t.Fatalf("steam groups=%+v", sg)
 	}
 }

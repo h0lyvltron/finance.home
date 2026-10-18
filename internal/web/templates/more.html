@@ -93,6 +93,7 @@
 
 {{define "category-row"}}
 {{$c := .C}}
+{{$csrf := .CSRF}}
 <div class="rule-row cat-row{{if .Child}} is-child{{end}}" id="cat-{{$c.ID}}" data-cat-row="{{$c.ID}}" data-category="{{$c.FormJSON}}"
   data-search="{{lower $c.Name}}">
   <div class="rule-main">
@@ -108,6 +109,30 @@
     <div class="tiny muted">
       {{if .N}}<a href="/transactions?category={{$c.ID}}&amp;preset=all">{{.N}} transaction{{if ne .N 1}}s{{end}}</a> · {{moneyAbs .T .Currency}}{{else}}Not used yet{{end}}{{if .R}} · <a href="/rules?q={{lower $c.Name}}">{{.R}} rule{{if ne .R 1}}s{{end}}</a>{{end}}{{if $c.Children}} · {{len $c.Children}} subcategor{{if eq (len $c.Children) 1}}y{{else}}ies{{end}}{{end}}
     </div>
+    {{if and (eq $c.Kind "income") (eq $c.Name "Interest") (lt .T 0)}}
+    <p class="tiny" style="margin:.35rem 0 0">Card interest is filed here, so it shrinks income and never shows as spending.</p>
+    {{end}}
+    {{range $c.Splits}}
+    <div class="split-note">
+      <p class="tiny" style="margin:.45rem 0 .3rem">{{.Detail}}</p>
+      <form method="post" action="/categories/split" class="row" style="flex-wrap:wrap;gap:.4rem;align-items:center">
+        <input type="hidden" name="csrf" value="{{$csrf}}">
+        <input type="hidden" name="category_id" value="{{.CategoryID}}">
+        <input type="hidden" name="payee_key" value="{{.PayeeKey}}">
+        <input name="name" value="{{.Name}}" maxlength="80" required aria-label="Name for the new category" style="max-width:14rem">
+        <button class="btn btn-sm btn-primary" type="submit">Split out</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-cat="tx" data-ids="{{.IDs}}" data-key="{{.PayeeKey}}" data-remember="1" data-label="1" data-title="Move {{.Name}} into…">Move into an existing category…</button>
+      </form>
+      <form method="post" action="/coaching/dismiss" style="margin-top:.25rem">
+        <input type="hidden" name="csrf" value="{{$csrf}}">
+        <input type="hidden" name="kind" value="split">
+        <input type="hidden" name="category_id" value="{{.CategoryID}}">
+        <input type="hidden" name="payee_key" value="{{.PayeeKey}}">
+        <input type="hidden" name="return" value="/categories#cat-{{.CategoryID}}">
+        <button class="btn btn-sm btn-ghost" type="submit">Not now</button>
+      </form>
+    </div>
+    {{end}}
   </div>
   {{if not $c.Protected}}
   <div class="rule-actions">
@@ -137,6 +162,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Categories</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
   <script src="/static/js/categorize.js" defer></script>
 </head>
 <body>
@@ -144,6 +170,7 @@
   {{template "nav" .}}
   {{template "topbar" .}}
   {{template "csrf" .}}
+  {{if .UndoID}}<div id="toast-region" class="toast-region">{{template "toast" .}}</div>{{end}}
   <h1 style="margin:0">Categories</h1>
   <p class="muted">Rename, regroup or merge categories. Merging moves every transaction, payee rule and budget to the other category,
     and Undo puts it all back.</p>

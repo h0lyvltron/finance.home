@@ -101,7 +101,7 @@ func (s *Store) ClearCoachingPref(personID int64, kind string) error {
 
 func normalizeInsightKind(kind string) string {
 	switch kind {
-	case "pace", "review", "bills", "positive", "goal", "spike", "card":
+	case "pace", "review", "bills", "positive", "goal", "spike", "card", "split":
 		return kind
 	default:
 		return ""

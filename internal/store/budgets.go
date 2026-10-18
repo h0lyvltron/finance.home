@@ -238,6 +238,8 @@ func (s *Store) categorySpendMap(ym string) (map[int64]int64, error) {
 		}
 		if amt < 0 {
 			amt = -amt
+		} else {
+			amt = 0
 		}
 		out[id] = amt
 	}
@@ -486,6 +488,8 @@ func (s *Store) FlexibleSpentMonth(ym string) (int64, error) {
 	v := amt.Int64
 	if v < 0 {
 		v = -v
+	} else {
+		v = 0
 	}
 	return v, nil
 }
@@ -557,22 +561,22 @@ func (s *Store) PaceInsight(h *models.Household, ym string, now time.Time) *mode
 	href := fmt.Sprintf("/transactions?preset=this_month&category=%d", best.CategoryID)
 	if best.Remaining < 0 {
 		return &models.CoachingInsight{
-			Kind:   "pace",
-			Tone:   "warn",
-			Title:  best.CategoryName + " is over pace",
-			Detail: fmt.Sprintf("%s over budget · %d days left", formatRough(best.Remaining), daysLeft),
-			Href:   href,
-			Amount: -best.Remaining,
+			Kind:    "pace",
+			Tone:    "warn",
+			Title:   best.CategoryName + " is over pace",
+			Detail:  fmt.Sprintf("%s over budget · %d days left", formatRough(best.Remaining), daysLeft),
+			Href:    href,
+			Amount:  -best.Remaining,
 			ShowAmt: true,
 		}
 	}
 	return &models.CoachingInsight{
-		Kind:   "pace",
-		Tone:   "info",
-		Title:  best.CategoryName + " pace",
-		Detail: fmt.Sprintf("%s/day left · %d days remaining", formatRough(perDay), daysLeft),
-		Href:   href,
-		Amount: perDay,
+		Kind:    "pace",
+		Tone:    "info",
+		Title:   best.CategoryName + " pace",
+		Detail:  fmt.Sprintf("%s/day left · %d days remaining", formatRough(perDay), daysLeft),
+		Href:    href,
+		Amount:  perDay,
 		ShowAmt: true,
 	}
 }

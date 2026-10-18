@@ -231,6 +231,23 @@ h3 { font-size: 1.05rem; }
 .tx-amount.neg { color: var(--danger); }
 .tx-amount.pos { color: var(--ok); }
 .tx-bal { font-size: .75rem; color: var(--ink-faint); text-align: right; }
+.import-cluster {
+  margin: .85rem 0 .35rem;
+  padding: .65rem .75rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.import-cluster .row { flex-wrap: wrap; justify-content: flex-end; }
+.split-note input[name="name"] {
+  font: inherit;
+  font-size: .875rem;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .35rem .55rem;
+}
 
 .bottom-nav {
   position: fixed;
@@ -312,9 +329,20 @@ h3 { font-size: 1.05rem; }
   padding: 1rem 1rem calc(1rem + var(--safe-bottom));
   max-height: 92dvh;
   overflow: auto;
+  overscroll-behavior: contain;
   transform: translateY(110%);
   transition: transform .22s ease;
   box-shadow: var(--shadow);
+}
+html:has(.sheet-backdrop.open),
+body:has(.sheet-backdrop.open) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.sheet-backdrop.open {
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 .sheet.open { transform: translateY(0); }
 .sheet-handle {

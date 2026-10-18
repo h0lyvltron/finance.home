@@ -13,8 +13,9 @@ import (
 )
 
 type catRefJSON struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type categorizeResult struct {
@@ -59,7 +60,7 @@ func unionIDs(a, b []int64) []int64 {
 func refsJSON(refs []models.CategoryRef) []catRefJSON {
 	out := make([]catRefJSON, len(refs))
 	for i, r := range refs {
-		out[i] = catRefJSON{ID: r.ID, Name: r.Name}
+		out[i] = catRefJSON{ID: r.ID, Name: r.Name, Reason: r.Reason}
 	}
 	return out
 }

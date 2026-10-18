@@ -28,6 +28,11 @@ func main() {
 	if err := db.Migrate(sqlDB); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	if undoID, changed, err := store.New(sqlDB).RepairTransferOutliers(0); err != nil {
+		log.Printf("transfer repair: %v", err)
+	} else if changed {
+		log.Printf("repaired card-payment links (undo %s)", undoID)
+	}
 
 	renderer, err := web.NewRenderer()
 	if err != nil {

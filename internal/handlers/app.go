@@ -58,12 +58,12 @@ type pageData struct {
 	UndoID        string
 	Message       string
 	// import / rules
-	Batches        []models.ImportBatch
-	Batch          *models.ImportBatch
-	Profiles       []models.MappingProfile
-	Rules          []models.PayeeRule
-	RuleViews      []store.RuleView
-	RuleQuery      string
+	Batches   []models.ImportBatch
+	Batch     *models.ImportBatch
+	Profiles  []models.MappingProfile
+	Rules     []models.PayeeRule
+	RuleViews []store.RuleView
+	RuleQuery string
 	// categories page
 	CategoryGroups     []store.CategoryGroup
 	ArchivedCategories []store.CategoryView
@@ -72,18 +72,19 @@ type pageData struct {
 	TagViews         []store.TagView
 	ArchivedTagViews []store.TagView
 	TxSummary        *txSummaryView
-	StagingRows    []models.StagingRow
-	DrawerRow      *models.StagingRow
-	Headers        []string
-	Guess          any
-	Page           int
-	PageSize       int
-	Total          int
-	TotalPages     int
-	ExceptionsOnly bool
-	ImportedCount  int
-	ErrorCount     int
-	FirstError     string
+	StagingRows      []models.StagingRow
+	StagingGroups    []store.StagingGroup
+	DrawerRow        *models.StagingRow
+	Headers          []string
+	Guess            any
+	Page             int
+	PageSize         int
+	Total            int
+	TotalPages       int
+	ExceptionsOnly   bool
+	ImportedCount    int
+	ErrorCount       int
+	FirstError       string
 	// filters / reports
 	Filter       filterView
 	GroupBy      string
@@ -106,7 +107,7 @@ type pageData struct {
 	ReviewGroups      []store.ReviewGroup
 	UncatCount        int
 	UncatSpend        int64
-	QueryString  string
+	QueryString       string
 	// plan / home (slice 4)
 	PlanTab      string
 	YearMonth    string
@@ -264,6 +265,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /drafts/{id}/delete", a.requireAuth(a.csrf(a.draftDelete)))
 	mux.HandleFunc("GET /categories", a.requireAuth(a.categoriesPage))
 	mux.HandleFunc("POST /categories", a.requireAuth(a.csrf(a.categoryCreate)))
+	mux.HandleFunc("POST /categories/split", a.requireAuth(a.csrf(a.categorySplit)))
 	mux.HandleFunc("POST /categories/{id}", a.requireAuth(a.csrf(a.categoryUpdate)))
 	mux.HandleFunc("POST /categories/{id}/move", a.requireAuth(a.csrf(a.categoryMove)))
 	mux.HandleFunc("POST /categories/{id}/archive", a.requireAuth(a.csrf(a.categoryArchive)))

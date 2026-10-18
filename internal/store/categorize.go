@@ -45,20 +45,30 @@ func (s *Store) CategoryRef(id int64) (models.CategoryRef, error) {
 	return r, err
 }
 
-// Suggester proposes categories for a payee from payee rules and from how the
-// same merchant was categorized before.
+// Suggester proposes categories for a payee from payee rules and from how
+// similar merchants were categorized before, using amount as a tie-break.
 type Suggester struct {
 	rules []models.PayeeRule
 	names map[int64]string
-	hist  map[string]map[int64]int
+	keys  []string
+	hist  map[string][]histSample
 }
+
+type histSample struct {
+	cat    int64
+	amount int64
+}
+
+// SuggestedCategoryLabel marks a staging row whose category was pre-filled
+// from a fuzzy or thin history match and still needs a look.
+const SuggestedCategoryLabel = "Suggested"
 
 func (s *Store) NewSuggester() (*Suggester, error) {
 	rules, err := s.ListPayeeRules()
 	if err != nil {
 		return nil, err
 	}
-	g := &Suggester{rules: rules, names: map[int64]string{}, hist: map[string]map[int64]int{}}
+	g := &Suggester{rules: rules, names: map[int64]string{}, hist: map[string][]histSample{}}
 	rows, err := s.DB.Query(`SELECT id, name FROM categories WHERE archived=0 AND kind != 'starting_balance'`)
 	if err != nil {
 		return nil, err
@@ -74,48 +84,49 @@ func (s *Store) NewSuggester() (*Suggester, error) {
 	}
 	rows.Close()
 
-	rows, err = s.DB.Query(`SELECT COALESCE(t.payee_name,''), t.category_id FROM transactions t
+	rows, err = s.DB.Query(`SELECT COALESCE(t.payee_name,''), t.category_id, t.amount FROM transactions t
+		JOIN categories c ON c.id = t.category_id
 		WHERE t.deleted_at IS NULL AND t.needs_review=0 AND t.is_split=0 AND t.transfer_id IS NULL
-		AND t.category_id IS NOT NULL`)
+		AND c.archived=0 AND c.kind NOT IN ('transfer', 'starting_balance')`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var name string
-		var cat int64
-		if err := rows.Scan(&name, &cat); err != nil {
+		var cat, amt int64
+		if err := rows.Scan(&name, &cat, &amt); err != nil {
 			return nil, err
 		}
 		k := payee.Key(name)
 		if k == "" {
 			continue
 		}
-		if g.hist[k] == nil {
-			g.hist[k] = map[int64]int{}
+		if _, ok := g.hist[k]; !ok {
+			g.keys = append(g.keys, k)
 		}
-		g.hist[k][cat]++
+		g.hist[k] = append(g.hist[k], histSample{cat: cat, amount: amt})
 	}
 	return g, rows.Err()
 }
 
 // For returns up to three categories: the matching rule's first, then the
-// ones most often used for the same merchant.
+// ones most often used for a similar merchant.
 func (g *Suggester) For(payeeName string, amount, accountID int64) []models.CategoryRef {
-	var ids []int64
-	if r := MatchPayeeRule(g.rules, payeeName, "", amount, accountID); r != nil && r.SetCategoryID != nil {
-		ids = append(ids, *r.SetCategoryID)
-	}
-	ids = append(ids, g.history(payee.Key(payeeName))...)
 	var out []models.CategoryRef
 	seen := map[int64]bool{}
-	for _, id := range ids {
-		name, ok := g.names[id]
-		if !ok || seen[id] {
+	if r := MatchPayeeRule(g.rules, payeeName, "", amount, accountID); r != nil && r.SetCategoryID != nil {
+		if name, ok := g.names[*r.SetCategoryID]; ok {
+			seen[*r.SetCategoryID] = true
+			out = append(out, models.CategoryRef{ID: *r.SetCategoryID, Name: name, Reason: "payee rule"})
+		}
+	}
+	for _, ref := range g.ranked(payeeName, amount) {
+		if seen[ref.ID] {
 			continue
 		}
-		seen[id] = true
-		out = append(out, models.CategoryRef{ID: id, Name: name})
+		seen[ref.ID] = true
+		out = append(out, ref)
 		if len(out) == 3 {
 			break
 		}
@@ -123,41 +134,200 @@ func (g *Suggester) For(payeeName string, amount, accountID int64) []models.Cate
 	return out
 }
 
-// Usual returns the category most often used for this merchant, if any.
-func (g *Suggester) Usual(payeeName string) *models.CategoryRef {
-	for _, id := range g.history(payee.Key(payeeName)) {
-		if name, ok := g.names[id]; ok {
-			return &models.CategoryRef{ID: id, Name: name}
-		}
-	}
-	return nil
-}
-
-func (g *Suggester) history(key string) []int64 {
-	if key == "" {
+// Usual returns a category only when history is confident enough to file
+// without review: at least two similar transactions and one category with
+// about 80% of them, or a single amount band when history is split.
+func (g *Suggester) Usual(payeeName string, amount int64) *models.CategoryRef {
+	ref, auto := g.classify(payeeName, amount)
+	if !auto {
 		return nil
 	}
-	counts := g.hist[key]
-	if counts == nil {
-		// Banks truncate descriptions, e.g. "HUBMAN AND CHUBGI" vs "HUBMAN AND CHUBGIRL".
-		for k, c := range g.hist {
-			if len(k) >= 8 && len(key) >= 8 && (strings.HasPrefix(k, key) || strings.HasPrefix(key, k)) {
-				counts = c
-				break
+	return ref
+}
+
+// classify returns the best category and whether it is confident enough to
+// skip review. A weaker match still pre-fills a suggestion.
+func (g *Suggester) classify(payeeName string, amount int64) (*models.CategoryRef, bool) {
+	stats := g.catStats(payeeName, amount)
+	if len(stats) == 0 {
+		return nil, false
+	}
+	best := stats[0]
+	name, ok := g.names[best.id]
+	if !ok {
+		return nil, false
+	}
+	ref := &models.CategoryRef{ID: best.id, Name: name, Reason: best.reason}
+	return ref, best.auto
+}
+
+type catStat struct {
+	id       int64
+	count    int
+	exact    int
+	weighted float64
+	payee    float64
+	amounts  []int64
+	close    bool
+	reason   string
+	auto     bool
+}
+
+func (g *Suggester) ranked(payeeName string, amount int64) []models.CategoryRef {
+	stats := g.catStats(payeeName, amount)
+	out := make([]models.CategoryRef, 0, len(stats))
+	for _, st := range stats {
+		name, ok := g.names[st.id]
+		if !ok {
+			continue
+		}
+		out = append(out, models.CategoryRef{ID: st.id, Name: name, Reason: st.reason})
+	}
+	return out
+}
+
+func (g *Suggester) catStats(payeeName string, amount int64) []catStat {
+	type acc struct {
+		count    int
+		exact    int
+		weighted float64
+		payee    float64
+		amounts  []int64
+		close    int
+	}
+	byCat := map[int64]*acc{}
+	for _, k := range g.keys {
+		sim := payee.Score(payeeName, k)
+		if sim == 0 {
+			continue
+		}
+		for _, sm := range g.hist[k] {
+			a := byCat[sm.cat]
+			if a == nil {
+				a = &acc{}
+				byCat[sm.cat] = a
+			}
+			a.count++
+			if sim == 1 {
+				a.exact++
+			}
+			w := amountWeight(amount, sm.amount)
+			a.weighted += sim * w
+			a.payee += sim
+			a.amounts = append(a.amounts, sm.amount)
+			if w >= 0.7 {
+				a.close++
 			}
 		}
 	}
-	ids := make([]int64, 0, len(counts))
-	for id := range counts {
-		ids = append(ids, id)
+	if len(byCat) == 0 {
+		return nil
 	}
-	sort.Slice(ids, func(i, j int) bool {
-		if counts[ids[i]] != counts[ids[j]] {
-			return counts[ids[i]] > counts[ids[j]]
+	stats := make([]catStat, 0, len(byCat))
+	total := 0
+	var topPayee float64
+	topPayeeID := int64(0)
+	for id, a := range byCat {
+		total += a.count
+		if a.payee > topPayee || (a.payee == topPayee && (topPayeeID == 0 || id < topPayeeID)) {
+			topPayee = a.payee
+			topPayeeID = id
 		}
-		return ids[i] < ids[j]
+		stats = append(stats, catStat{
+			id: id, count: a.count, exact: a.exact,
+			weighted: a.weighted, payee: a.payee, amounts: a.amounts, close: a.close > 0,
+		})
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].weighted != stats[j].weighted {
+			return stats[i].weighted > stats[j].weighted
+		}
+		if stats[i].count != stats[j].count {
+			return stats[i].count > stats[j].count
+		}
+		return stats[i].id < stats[j].id
 	})
-	return ids
+	inRangeN := 0
+	var onlyRange int64
+	for i := range stats {
+		if stats[i].count >= 2 && amountInRange(amount, stats[i].amounts) {
+			inRangeN++
+			onlyRange = stats[i].id
+		}
+	}
+	top := &stats[0]
+	auto := false
+	if total >= 2 && top.count*5 >= total*4 {
+		auto = true
+	} else if total >= 2 && inRangeN == 1 && onlyRange == top.id && top.count >= 2 {
+		auto = true
+	}
+	for i := range stats {
+		st := &stats[i]
+		switch {
+		case st.exact > 0:
+			st.reason = "same payee"
+		case st.id != topPayeeID && st.close:
+			st.reason = "similar amount"
+		default:
+			st.reason = "similar description"
+		}
+		if st.id == top.id {
+			st.auto = auto
+			if auto && inRangeN == 1 && !(total >= 2 && top.count*5 >= total*4) {
+				st.reason = "similar amount"
+			}
+		}
+	}
+	return stats
+}
+
+func amountWeight(amount, sample int64) float64 {
+	if amountNear(amount, sample) {
+		return 1
+	}
+	if amountInRange(amount, []int64{sample}) {
+		return 0.7
+	}
+	return 0.35
+}
+
+func amountNear(amount, sample int64) bool {
+	diff := amount - sample
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff <= 50 {
+		return true
+	}
+	base := sample
+	if base < 0 {
+		base = -base
+	}
+	return base > 0 && diff*20 <= base
+}
+
+func amountInRange(amount int64, amounts []int64) bool {
+	if len(amounts) == 0 {
+		return false
+	}
+	min, max := amounts[0], amounts[0]
+	for _, a := range amounts {
+		if a < min {
+			min = a
+		}
+		if a > max {
+			max = a
+		}
+	}
+	pad := (max - min) / 5
+	if pad < 0 {
+		pad = -pad
+	}
+	if pad < 200 {
+		pad = 200
+	}
+	return amount >= min-pad && amount <= max+pad
 }
 
 // Rule returns the payee rule that would file this payee, if any.
@@ -194,7 +364,7 @@ func (s *Store) similarTransactions(match, cond string) ([]int64, error) {
 		if err := rows.Scan(&id, &name); err != nil {
 			return nil, err
 		}
-		if payee.Matches(name, match) {
+		if payee.Matches(name, match) || payee.Similar(name, match) {
 			out = append(out, id)
 		}
 	}
@@ -220,7 +390,7 @@ func (s *Store) SimilarStagingRows(batchID int64, match string) ([]int64, error)
 		if err := rows.Scan(&id, &name); err != nil {
 			return nil, err
 		}
-		if payee.Matches(name, match) {
+		if payee.Matches(name, match) || payee.Similar(name, match) {
 			out = append(out, id)
 		}
 	}
@@ -509,38 +679,14 @@ func (g ReviewGroup) IDs() string {
 	return strings.Join(parts, " ")
 }
 
-// GroupForReview buckets transactions by merchant key, largest groups first.
+// GroupForReview buckets transactions by merchant, largest groups first.
+// Truncated and fuzzy-similar descriptions share a group.
 func GroupForReview(items []models.Transaction) []ReviewGroup {
 	keys := make([]string, len(items))
-	uniq := map[string]bool{}
 	for i, t := range items {
 		keys[i] = payee.Key(t.PayeeName)
-		uniq[keys[i]] = true
 	}
-	sorted := make([]string, 0, len(uniq))
-	for k := range uniq {
-		sorted = append(sorted, k)
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		if len(sorted[i]) != len(sorted[j]) {
-			return len(sorted[i]) < len(sorted[j])
-		}
-		return sorted[i] < sorted[j]
-	})
-	root := map[string]string{}
-	var roots []string
-	for _, k := range sorted {
-		root[k] = k
-		for _, r := range roots {
-			if len(r) >= 8 && strings.HasPrefix(k, r) {
-				root[k] = r
-				break
-			}
-		}
-		if root[k] == k {
-			roots = append(roots, k)
-		}
-	}
+	root := clusterKeys(keys)
 
 	idx := map[string]int{}
 	var groups []ReviewGroup
@@ -576,5 +722,101 @@ func GroupForReview(items []models.Transaction) []ReviewGroup {
 		}
 		return abs64(groups[i].Total) > abs64(groups[j].Total)
 	})
+	return groups
+}
+
+// clusterKeys maps each merchant key to the label of its cluster. Similar
+// keys share the longer label so a truncated description joins the full one.
+func clusterKeys(keys []string) map[string]string {
+	index := map[string]int{}
+	var uniq []string
+	for _, k := range keys {
+		if _, ok := index[k]; ok {
+			continue
+		}
+		index[k] = len(uniq)
+		uniq = append(uniq, k)
+	}
+	parent := make([]int, len(uniq))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(i int) int {
+		if parent[i] != i {
+			parent[i] = find(parent[i])
+		}
+		return parent[i]
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra == rb {
+			return
+		}
+		if len(uniq[ra]) < len(uniq[rb]) || (len(uniq[ra]) == len(uniq[rb]) && uniq[ra] > uniq[rb]) {
+			ra, rb = rb, ra
+		}
+		parent[rb] = ra
+	}
+	for i := 0; i < len(uniq); i++ {
+		if uniq[i] == "" {
+			continue
+		}
+		for j := i + 1; j < len(uniq); j++ {
+			if uniq[j] == "" {
+				continue
+			}
+			if payee.Similar(uniq[i], uniq[j]) {
+				union(i, j)
+			}
+		}
+	}
+	out := make(map[string]string, len(uniq))
+	for k, i := range index {
+		out[k] = uniq[find(i)]
+	}
+	return out
+}
+
+// StagingGroup is a run of import-preview rows from the same merchant.
+type StagingGroup struct {
+	Key     string
+	Rows    []models.StagingRow
+	Total   int64
+	Suggest []models.CategoryRef
+}
+
+// IDs is the space-separated staging-row id list used by the categorize picker.
+func (g StagingGroup) IDs() string {
+	parts := make([]string, len(g.Rows))
+	for i, r := range g.Rows {
+		parts[i] = strconv.FormatInt(r.ID, 10)
+	}
+	return strings.Join(parts, " ")
+}
+
+// GroupStaging clusters preview rows by merchant, keeping file order.
+func GroupStaging(rows []models.StagingRow) []StagingGroup {
+	if len(rows) == 0 {
+		return nil
+	}
+	keys := make([]string, len(rows))
+	for i, r := range rows {
+		keys[i] = payee.Key(r.PayeeName)
+	}
+	root := clusterKeys(keys)
+	idx := map[string]int{}
+	var groups []StagingGroup
+	for i, r := range rows {
+		k := root[keys[i]]
+		gi, ok := idx[k]
+		if !ok {
+			gi = len(groups)
+			idx[k] = gi
+			groups = append(groups, StagingGroup{Key: k})
+		}
+		groups[gi].Rows = append(groups[gi].Rows, r)
+		groups[gi].Total += r.Amount
+	}
 	return groups
 }

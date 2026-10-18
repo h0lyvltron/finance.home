@@ -295,6 +295,21 @@ func (s *Store) Undo(undoID string) error {
 		}
 		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
 		return tx.Commit()
+	case "transfer_repair", "category_split":
+		undoFn := map[string]func(*sql.Tx, string) error{
+			"transfer_repair": undoTransferRepair,
+			"category_split":  undoCategorySplit,
+		}[kind]
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := undoFn(tx, payload); err != nil {
+			return err
+		}
+		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
+		return tx.Commit()
 	case "rule_delete", "category_archive", "category_merge", "tag_change", "tag_merge", "tag_archive", "tag_delete":
 		undoFn := map[string]func(*sql.Tx, string) error{
 			"rule_delete":      undoRuleDelete,

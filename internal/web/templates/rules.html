@@ -217,7 +217,7 @@
       <div class="rg-actions">
         {{range .Suggest}}
         <button type="button" class="chip chip-lg chip-suggest" data-cat-quick data-target="tx" data-ids="{{$g.IDs}}"
-          data-category="{{.ID}}" data-key="{{$g.Key}}" data-remember="1">✓ {{.Name}}</button>
+          data-category="{{.ID}}" data-key="{{$g.Key}}" data-remember="1">✓ {{.Name}}{{if .Reason}} · {{.Reason}}{{end}}</button>
         {{end}}
         {{template "cat-chip" (dict "Target" "tx" "IDs" .IDs "Payee" $first.PayeeName "Amount" .Total "Account" $first.AccountID "Current" (ptrID .CategoryID) "Name" .CategoryName "Person" "" "Key" .Key "Remember" true "Label" (print (or (and .Suggest "Something else…") "Choose category…")) "Class" "chip-lg" "Title" (print (or .Key "(no payee)")))}}
         <button type="button" class="btn btn-sm btn-ghost" data-review-skip data-ids="{{.IDs}}" title="Leave uncategorized and take out of the queue">Mark reviewed</button>

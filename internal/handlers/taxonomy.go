@@ -20,15 +20,51 @@ func (a *App) renderCategories(w http.ResponseWriter, r *http.Request, sess *aut
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	if splits, err := a.Store.SplitSuggestions(sess.PersonID); err == nil {
+		attachSplits(groups, splits)
+	}
 	d.CategoryGroups = groups
 	d.ArchivedCategories = archived
 	d.Swatches = store.CategorySwatches
 	d.RuleQuery = r.URL.Query().Get("q")
+	if undoID := r.URL.Query().Get("undo"); undoID != "" {
+		d.UndoID = undoID
+		d.Message = "Split out. Undo is available for 30 minutes."
+	}
 	a.Render.RenderHTTP(w, "categories", d)
 }
 
 func (a *App) categoriesPage(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	a.renderCategories(w, r, sess, "")
+}
+
+func attachSplits(groups []store.CategoryGroup, splits []store.SplitSuggestion) {
+	byCat := map[int64][]store.SplitSuggestion{}
+	for _, sp := range splits {
+		byCat[sp.CategoryID] = append(byCat[sp.CategoryID], sp)
+	}
+	for gi := range groups {
+		for ii := range groups[gi].Items {
+			item := &groups[gi].Items[ii]
+			item.Splits = byCat[item.ID]
+			for ci := range item.Children {
+				ch := &item.Children[ci]
+				ch.Splits = byCat[ch.ID]
+			}
+		}
+	}
+}
+
+func (a *App) categorySplit(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	_ = r.ParseForm()
+	sourceID, _ := strconv.ParseInt(r.FormValue("category_id"), 10, 64)
+	newID, undoID, n, err := a.Store.SplitPayeeCategory(sourceID, r.FormValue("payee_key"), r.FormValue("name"), sess.PersonID)
+	if err != nil {
+		a.renderCategories(w, r, sess, err.Error())
+		return
+	}
+	_ = n
+	http.Redirect(w, r, "/categories?undo="+undoID+"#cat-"+strconv.FormatInt(newID, 10), http.StatusSeeOther)
 }
 
 func formParentID(r *http.Request) *int64 {

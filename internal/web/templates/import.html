@@ -273,7 +273,26 @@
       <span class="tiny muted">Page {{.Page}} of {{if gt .TotalPages 0}}{{.TotalPages}}{{else}}1{{end}}</span>
     </div>
 
-    {{range .StagingRows}}
+    {{range .StagingGroups}}
+    {{$g := .}}
+    {{if gt (len .Rows) 1}}
+    <div class="import-cluster">
+      <div class="spread">
+        <div>
+          <div class="tx-payee">{{if .Key}}{{.Key}}{{else}}(no payee){{end}}</div>
+          <div class="tiny muted">{{len .Rows}} on this page · one choice covers the similar rows in this import</div>
+        </div>
+        <div class="row">
+          {{range .Suggest}}
+          <button type="button" class="chip chip-suggest" data-cat-quick data-target="staging" data-batch="{{$.Batch.ID}}"
+            data-ids="{{$g.IDs}}" data-category="{{.ID}}" data-key="{{$g.Key}}" data-similar="1" data-remember="1">✓ {{.Name}}{{if .Reason}} · {{.Reason}}{{end}}</button>
+          {{end}}
+          {{template "cat-chip" (dict "Target" "staging" "Batch" $.Batch.ID "IDs" .IDs "Payee" (index .Rows 0).PayeeName "Amount" .Total "Account" (ptrID $.Batch.AccountID) "Key" .Key "Remember" true "Label" "Choose category…" "Class" "chip-lg" "Title" (or .Key "(no payee)"))}}
+        </div>
+      </div>
+    </div>
+    {{end}}
+    {{range .Rows}}
     <article class="tx-card import-row">
       <label class="check import-select">
         <input type="checkbox" name="row_id" value="{{.ID}}" aria-label="Select this row">
@@ -284,7 +303,7 @@
             {{.TransactionDate}} · row {{add .RowIndex 1}}
             {{if and (not .Exception) (eq .Action "import")}} · {{template "cat-chip" (dict "Target" "staging" "Batch" $.Batch.ID "IDs" .ID "Payee" .PayeeName "Amount" .Amount "Account" (ptrID $.Batch.AccountID) "Current" (ptrID .CategoryID) "Name" .CategoryName "Person" .Person "Remember" true)}}
             {{else if .CategoryName}} · {{.CategoryName}}{{end}}
-            {{if and .MatchedRuleName .NeedsReview}} · <span class="chip" data-auto-note="{{.ID}}">{{if .MatchedRuleID}}Rule: {{end}}{{.MatchedRuleName}}</span>{{end}}
+            {{if .MatchedRuleName}} · <span class="chip" data-auto-note="{{.ID}}">{{if .MatchedRuleID}}Rule: {{end}}{{.MatchedRuleName}}</span>{{end}}
             {{if .Exception}} · <span class="chip chip-warn">{{.Exception}}</span>{{end}}
             {{if .DuplicateTxID}} · <span class="chip chip-warn">Duplicate? {{.DuplicateSummary}}</span>{{end}}
             {{if .MatchTxID}} · <span class="chip">Merge ← {{.MatchSummary}}</span>{{end}}
@@ -298,6 +317,7 @@
       {{if .Exception}}<div class="tx-amount muted">—</div>
       {{else}}<div class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</div>{{end}}
     </article>
+    {{end}}
     {{else}}
     <p class="muted">No rows on this page.</p>
     {{end}}

@@ -156,6 +156,10 @@
                 <form method="post" action="/coaching/dismiss">
                   {{template "csrf" $}}
                   <input type="hidden" name="kind" value="{{.Kind}}">
+                  {{if .SplitKey}}
+                  <input type="hidden" name="category_id" value="{{.SplitCategory}}">
+                  <input type="hidden" name="payee_key" value="{{.SplitKey}}">
+                  {{end}}
                   <input type="hidden" name="return" value="/">
                   <button class="btn btn-sm btn-ghost" type="submit" title="Dismiss this type">Dismiss</button>
                 </form>

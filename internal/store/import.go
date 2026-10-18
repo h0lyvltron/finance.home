@@ -230,6 +230,7 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 		var ruleName, person, rename, tags, categoryName string
 		person = "shared"
 		exception := pr.Error
+		autoFile := false
 
 		if pr.Error == "" {
 			if rule := MatchPayeeRule(rules, pr.Payee, pr.Notes, pr.Amount, in.AccountID); rule != nil {
@@ -246,9 +247,14 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 					rename = rule.RenamePayee
 				}
 				tags = rule.SetTags
-			} else if u := sg.Usual(pr.Payee); u != nil {
-				catID = sql.NullInt64{Int64: u.ID, Valid: true}
-				ruleName = UsualCategoryLabel
+			} else if ref, auto := sg.classify(pr.Payee, pr.Amount); ref != nil {
+				catID = sql.NullInt64{Int64: ref.ID, Valid: true}
+				if auto {
+					ruleName = UsualCategoryLabel
+					autoFile = true
+				} else {
+					ruleName = SuggestedCategoryLabel
+				}
 			}
 			// Duplicate advisory
 			if dupID, summary, ok := findFingerprintTx(tx, fp, in.AccountID); ok {
@@ -264,10 +270,10 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 					action = "merge"
 				}
 			}
-			if !catID.Valid {
-				needsReview = 1
-			} else if action == "import" {
-				needsReview = 1 // imported/rule-applied still go to review until confirmed
+			// A confident usual category skips the review queue. Rules and
+			// weaker suggestions still wait for a person to confirm them.
+			if action == "import" && autoFile {
+				needsReview = 0
 			}
 		} else {
 			action = "skip"
@@ -404,23 +410,26 @@ const unlinkedTxSQL = `deleted_at IS NULL AND transfer_id IS NULL
 	AND id NOT IN (SELECT from_tx_id FROM transfers UNION ALL SELECT to_tx_id FROM transfers)`
 
 // suggestTransferPairs pairs staged rows with opposite-amount transactions on
-// other accounts within ±5 days. Closest dates are paired first and each staged
-// row and each existing transaction is used at most once.
+// other accounts within ±5 days. Both sides must look like a card payment, so
+// a purchase is never paired with an unrelated deposit of the same amount.
+// Matching issuers (Capital One with Capital One, Barclaycard with "Payment
+// Received") win over a merely closer date. Each staged row and each existing
+// transaction is used at most once.
 func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
-	rows, err := tx.Query(`SELECT id, transaction_date, amount FROM import_staging_rows
+	rows, err := tx.Query(`SELECT id, transaction_date, amount, COALESCE(payee_name,'') FROM import_staging_rows
 		WHERE batch_id=? AND exception IS NULL AND action='import' AND amount != 0`, batchID)
 	if err != nil {
 		return err
 	}
 	type st struct {
-		id   int64
-		date string
-		amt  int64
+		id, amt int64
+		date    string
+		payee   string
 	}
 	var staging []st
 	for rows.Next() {
 		var r st
-		if err := rows.Scan(&r.id, &r.date, &r.amt); err != nil {
+		if err := rows.Scan(&r.id, &r.date, &r.amt, &r.payee); err != nil {
 			rows.Close()
 			return err
 		}
@@ -434,22 +443,35 @@ func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 	type cand struct {
 		rowID, txID int64
 		dist        float64
+		rank        int
 	}
 	var cands []cand
 	for _, r := range staging {
-		crow, err := tx.Query(`SELECT id, ABS(julianday(transaction_date) - julianday(?)) FROM transactions
-			WHERE account_id != ? AND amount = ? AND `+unlinkedTxSQL+`
-			AND ABS(julianday(transaction_date) - julianday(?)) <= 5`,
+		if !paymentLike(r.payee) {
+			continue
+		}
+		crow, err := tx.Query(`SELECT t.id, ABS(julianday(t.transaction_date) - julianday(?)),
+			COALESCE(t.payee_name,''), a.name
+			FROM transactions t JOIN accounts a ON a.id = t.account_id
+			WHERE t.account_id != ? AND t.amount = ? AND t.deleted_at IS NULL AND t.transfer_id IS NULL
+			AND t.id NOT IN (SELECT from_tx_id FROM transfers UNION ALL SELECT to_tx_id FROM transfers)
+			AND ABS(julianday(t.transaction_date) - julianday(?)) <= 5`,
 			r.date, accountID, -r.amt, r.date)
 		if err != nil {
 			return err
 		}
 		for crow.Next() {
 			c := cand{rowID: r.id}
-			if err := crow.Scan(&c.txID, &c.dist); err != nil {
+			var txPayee, acctName string
+			if err := crow.Scan(&c.txID, &c.dist, &txPayee, &acctName); err != nil {
 				crow.Close()
 				return err
 			}
+			rank, ok := paymentPairRank(r.payee, txPayee, acctName)
+			if !ok {
+				continue
+			}
+			c.rank = rank
 			cands = append(cands, c)
 		}
 		crow.Close()
@@ -458,6 +480,9 @@ func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].rank != cands[j].rank {
+			return cands[i].rank > cands[j].rank
+		}
 		if cands[i].dist != cands[j].dist {
 			return cands[i].dist < cands[j].dist
 		}
@@ -478,6 +503,67 @@ func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 		}
 	}
 	return nil
+}
+
+func paymentLike(s string) bool {
+	u := strings.ToUpper(s)
+	for _, n := range []string{"PAYMENT", "PMT", "PYMT", "BARCLAY", "CAPITAL ONE", "CAPITOL ONE"} {
+		if strings.Contains(u, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// paymentIssuer classifies a card-payment description.
+// "received" is the Old Navy card's "Payment Received" credit.
+func paymentIssuer(s string) string {
+	u := strings.ToUpper(s)
+	switch {
+	case strings.Contains(u, "CAPITAL ONE"), strings.Contains(u, "CAPITOL ONE"):
+		return "capital"
+	case strings.Contains(u, "BARCLAY"):
+		return "barclay"
+	case strings.Contains(u, "PAYMENT RECEIVED"):
+		return "received"
+	default:
+		return "payment"
+	}
+}
+
+// paymentPairRank reports whether two payment descriptions may be the two
+// sides of one card payment, and how strong that match is. A higher rank
+// beats a closer date, so equal amounts on the same day don't cross cards.
+func paymentPairRank(stagingPayee, txPayee, accountName string) (int, bool) {
+	if !paymentLike(stagingPayee) || !paymentLike(txPayee) {
+		return 0, false
+	}
+	a, b := paymentIssuer(stagingPayee), paymentIssuer(txPayee)
+	rank := 1
+	switch {
+	case a == "capital" && b == "capital":
+		rank = 5
+	case (a == "barclay" && b == "received") || (a == "received" && b == "barclay"):
+		rank = 5
+	case a == "capital" && b == "received", a == "received" && b == "capital":
+		return 0, false
+	case a == "barclay" && b == "capital", a == "capital" && b == "barclay":
+		return 0, false
+	case a == b && a != "payment":
+		rank = 4
+	}
+	acct := strings.ToUpper(accountName)
+	if a == "capital" || b == "capital" {
+		if strings.Contains(acct, "CAPITAL") || strings.Contains(acct, "CAPITOL") {
+			rank += 2
+		}
+	}
+	if a == "barclay" || b == "barclay" || a == "received" || b == "received" {
+		if strings.Contains(acct, "NAVY") || strings.Contains(acct, "BARCLAY") {
+			rank += 2
+		}
+	}
+	return rank, true
 }
 
 type StagingFilter struct {
