@@ -1,6 +1,6 @@
 # Household finance
 
-Self-hosted, consumer-grade ledger for two people on a home LAN. Manual capture + CSV; bank sync is out of scope.
+Self-hosted ledger for two people on a home LAN. Manual capture + CSV; bank sync is out of scope.
 
 **Stack:** Go (`net/http`, `html/template`), Datastar, SQLite (`modernc.org/sqlite`), Chart.js, Docker Compose.
 
