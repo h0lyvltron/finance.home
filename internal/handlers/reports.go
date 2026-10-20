@@ -8,8 +8,20 @@ import (
 	"time"
 
 	"finance.home/internal/auth"
+	"finance.home/internal/models"
 	"finance.home/internal/store"
 )
+
+// setUncatBanner fills the "not categorized yet" banner. Its link lists the
+// same rows on Activity; the review queue may not hold them all, because a
+// row can be marked reviewed while still uncategorized.
+func (a *App) setUncatBanner(d *pageData, f store.QueryFilter, h *models.Household, now time.Time) {
+	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
+	uf := f.Clone()
+	uf.Uncategorized = true
+	uf.NeedsReview = nil
+	d.UncatHref = "/transactions?" + uf.EncodeQuery().Encode()
+}
 
 func (a *App) withFilterOptions(d *pageData) {
 	accts, _ := a.Store.ListAccounts(false)
@@ -93,7 +105,7 @@ func (a *App) trendsPage(w http.ResponseWriter, r *http.Request, sess *auth.Sess
 	for len(pt.ColKeys) > 1 && pt.ColTotals[pt.ColKeys[0]] == 0 {
 		pt.ColKeys, pt.ColLabels = pt.ColKeys[1:], pt.ColLabels[1:]
 	}
-	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
+	a.setUncatBanner(&d, f, h, now)
 
 	d.Filter = a.filterViewFor(r, sess, f, "/trends", explicit, "")
 	d.Grain = grain
@@ -152,7 +164,7 @@ func (a *App) explorePage(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 	d.GroupBy = groupBy
 	d.Segments = segs
 	d.ReportTotal = grand
-	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
+	a.setUncatBanner(&d, f, h, now)
 	d.ChartJSON = template.JS(store.CategoryChart(segs, d.CompareMode == "ly"))
 	d.DrillBase = "/transactions"
 
@@ -204,7 +216,7 @@ func (a *App) cashflowPage(w http.ResponseWriter, r *http.Request, sess *auth.Se
 	d.Filter = fv
 	d.Grain = grain
 	d.CashFlow = points
-	d.UncatCount, d.UncatSpend, _ = a.Store.UncategorizedSummary(f, h, now)
+	a.setUncatBanner(&d, f, h, now)
 	d.IncomeTotal = income
 	d.ExpenseTotal = expense
 	d.ReportTotal = net

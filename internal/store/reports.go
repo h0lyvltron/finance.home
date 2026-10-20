@@ -455,8 +455,7 @@ func exploreDrillQuery(f QueryFilter, groupBy, key, label string) string {
 		if id > 0 {
 			base.CategoryIDs = []int64{id}
 		} else {
-			review := true
-			base.NeedsReview = &review
+			base.Uncategorized = true
 		}
 	case "account":
 		id, _ := parseInt64(key)

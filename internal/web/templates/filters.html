@@ -285,7 +285,7 @@
 <div class="alert uncat-banner">
   <strong>{{.UncatCount}} transaction{{if ne .UncatCount 1}}s{{end}} not categorized yet</strong>
   ({{moneyAbs .UncatSpend .Currency}} of spending). They're included below as <em>Uncategorized</em>.
-  <a href="/review">Categorize in Review →</a>
+  <a href="{{if .UncatHref}}{{.UncatHref}}{{else}}/transactions?uncat=1{{end}}">Categorize them →</a>
 </div>
 {{end}}
 {{end}}

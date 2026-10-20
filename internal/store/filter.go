@@ -28,6 +28,9 @@ type QueryFilter struct {
 	Statuses    []string
 	NeedsReview *bool
 	Text        string
+	// Uncategorized keeps non-transfer transactions with no category or splits,
+	// whether or not they are still in the review queue.
+	Uncategorized bool
 
 	ExcludeTransfers bool
 	ExcludeStarting  bool
@@ -248,6 +251,9 @@ func (f QueryFilter) EncodeQuery() url.Values {
 	if f.Text != "" {
 		v.Set("q", f.Text)
 	}
+	if f.Uncategorized {
+		v.Set("uncat", "1")
+	}
 	return v
 }
 
@@ -302,6 +308,10 @@ func ParseQueryFilter(v url.Values) QueryFilter {
 	case "0", "false", "no":
 		t := false
 		f.NeedsReview = &t
+	}
+	switch strings.TrimSpace(v.Get("uncat")) {
+	case "1", "true", "yes":
+		f.Uncategorized = true
 	}
 	if aid := strings.TrimSpace(v.Get("account_id")); aid != "" && len(f.AccountIDs) == 0 {
 		if id, err := strconv.ParseInt(aid, 10, 64); err == nil && id > 0 {
@@ -472,6 +482,10 @@ func (s *Store) buildTxFilter(f QueryFilter, useSplits bool) (sqlFrag, error) {
 		} else {
 			b.WriteString(` AND t.needs_review = 0`)
 		}
+	}
+	if f.Uncategorized {
+		b.WriteString(` AND t.category_id IS NULL AND t.transfer_id IS NULL
+			AND NOT EXISTS (SELECT 1 FROM transaction_splits ux WHERE ux.transaction_id = t.id)`)
 	}
 	if f.Text != "" {
 		b.WriteString(` AND (COALESCE(t.payee_name,'') LIKE ? COLLATE NOCASE OR COALESCE(t.notes,'') LIKE ? COLLATE NOCASE)`)

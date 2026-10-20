@@ -107,6 +107,7 @@ type pageData struct {
 	ReviewGroups      []store.ReviewGroup
 	UncatCount        int
 	UncatSpend        int64
+	UncatHref         string
 	QueryString       string
 	// plan / home (slice 4)
 	PlanTab      string

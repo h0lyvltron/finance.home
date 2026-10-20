@@ -338,6 +338,9 @@ func (a *App) buildChips(r *http.Request, f store.QueryFilter, basePath, grain, 
 		}
 		add("review", label, func(v url.Values) { v.Del("review") })
 	}
+	if f.Uncategorized {
+		add("uncat", "Uncategorized", func(v url.Values) { v.Del("uncat") })
+	}
 	if f.Text != "" {
 		text := f.Text
 		add("q", "“"+text+"”", func(v url.Values) { v.Del("q") })
