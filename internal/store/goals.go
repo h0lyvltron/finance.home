@@ -219,10 +219,19 @@ func (s *Store) AccountBalanceAsOf(accountID int64, asOfDate string) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	if asOfDate < anchorDate {
-		return 0, nil
-	}
 	var sum sql.NullInt64
+	if asOfDate < anchorDate {
+		// The anchor is the start-of-day balance, so walk back over everything
+		// dated after asOfDate and before the anchor day.
+		err = s.DB.QueryRow(`
+			SELECT SUM(amount) FROM transactions
+			WHERE account_id=? AND deleted_at IS NULL AND transaction_date > ? AND transaction_date < ?`,
+			accountID, asOfDate, anchorDate).Scan(&sum)
+		if err != nil {
+			return 0, err
+		}
+		return anchor - sum.Int64, nil
+	}
 	err = s.DB.QueryRow(`
 		SELECT SUM(amount) FROM transactions
 		WHERE account_id=? AND deleted_at IS NULL AND transaction_date >= ? AND transaction_date <= ?`,

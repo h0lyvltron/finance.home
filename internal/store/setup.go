@@ -163,7 +163,7 @@ func seedCategories(tx *sql.Tx) error {
 		{name: "Health", kind: "expense", fixed: "flexible", color: "#8B6B8B", children: []string{"Medical", "Pharmacy", "Fitness"}},
 		{name: "Personal", kind: "expense", fixed: "flexible", color: "#9A7B6B", children: []string{"Shopping", "Subscriptions", "Entertainment", "Gifts"}},
 		{name: "Kids & pets", kind: "expense", fixed: "flexible", color: "#7A8B6B", children: []string{"Childcare", "Pet care", "Activities"}},
-		{name: "Debt payments", kind: "expense", fixed: "fixed", color: "#A66B6B", children: []string{"Credit card payment", "Loan payment"}},
+		{name: "Debt payments", kind: "expense", fixed: "fixed", color: "#A66B6B", children: []string{"Credit card payment", "Loan payment", "Loan interest"}},
 		{name: "Savings & goals", kind: "expense", fixed: "fixed", color: "#5A8B8B", children: []string{"Emergency fund", "Vacation"}},
 		{name: "Income", kind: "income", fixed: "", color: "#4A7C59", children: []string{"Paycheck", "Side income", "Interest", "Other income"}},
 	}

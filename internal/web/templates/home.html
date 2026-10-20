@@ -33,6 +33,15 @@
           </select>
           <span class="tiny muted">{{.PersonalDash.RangeFrom}} – {{.PersonalDash.RangeTo}}</span>
         </form>
+        {{$scope := .PersonalDash.Layout.ViewScope}}
+        <form method="post" action="/dashboard/scope" class="dash-scope" role="group" aria-label="Whose accounts">
+          {{template "csrf" .}}
+          <input type="hidden" name="return" value="{{if .DashEdit}}/?edit=1{{else}}/{{end}}">
+          <button type="submit" name="scope" value="household" class="{{if eq $scope "household"}}active{{end}}" aria-pressed="{{eq $scope "household"}}">Household</button>
+          <button type="submit" name="scope" value="a" class="{{if eq $scope "a"}}active{{end}}" aria-pressed="{{eq $scope "a"}}">{{.NameA}}</button>
+          <button type="submit" name="scope" value="b" class="{{if eq $scope "b"}}active{{end}}" aria-pressed="{{eq $scope "b"}}">{{.NameB}}</button>
+        </form>
+        {{if ne $scope "household"}}<p class="tiny muted" style="margin:.25rem 0 0">{{personLabel $scope .NameA .NameB}}'s accounts plus joint accounts.</p>{{end}}
       </div>
       <div class="row" style="gap:.4rem">
         {{if .DashEdit}}
@@ -119,7 +128,7 @@
         <div class="panel"><p class="muted small">{{$w.Error}}</p></div>
         {{else if eq $w.WidgetType "left_to_spend"}}
         <div class="home-hero">
-          <p class="tiny faint">Left to spend · {{$.YearMonth}}</p>
+          <p class="tiny faint">Left to spend · {{$.YearMonth}}{{if $w.HouseholdOnly}} {{template "household-badge"}}{{end}}</p>
           <h1 class="home-lts {{if lt $w.LeftToSpend.Amount 0}}neg{{else}}pos{{end}}">{{money $w.LeftToSpend.Amount $.Currency}}</h1>
           <p class="muted small home-lts-breakdown">
             {{money $w.LeftToSpend.ExpectedIncome $.Currency}} income
@@ -133,7 +142,7 @@
         {{else if eq $w.WidgetType "insights"}}
         <div class="panel insights-panel">
           <div class="spread">
-            <h2 style="margin:0">Insights</h2>
+            <h2 style="margin:0">Insights{{if $w.HouseholdOnly}} {{template "household-badge"}}{{end}}</h2>
             <a class="tiny faint" href="/settings">{{if $.FewerNudges}}Fewer nudges on{{else}}Density{{end}}</a>
           </div>
           {{if not $w.Insights}}
@@ -168,7 +177,7 @@
         {{else if eq $w.WidgetType "budget_health"}}
         <div class="panel">
           <div class="spread">
-            <h2 style="margin:0">Budget health</h2>
+            <h2 style="margin:0">Budget health{{if $w.HouseholdOnly}} {{template "household-badge"}}{{end}}</h2>
             <a class="btn btn-sm btn-ghost" href="/plan?month={{$.YearMonth}}&tab=budgets">Plan</a>
           </div>
           {{if and (eq $w.BudgetHealth.Budgeted 0) (eq $w.BudgetHealth.Spent 0)}}
@@ -265,7 +274,7 @@
         <div class="panel">
           <div class="spread">
             <h2 style="margin:0">Recent</h2>
-            <a class="btn btn-sm btn-ghost" href="/transactions">Activity</a>
+            <a class="btn btn-sm btn-ghost" href="/transactions{{template "scope-q" $.PersonalDash.ScopeAccounts}}">Activity</a>
           </div>
           {{if not $w.Transactions}}
           <p class="muted small" style="margin:.75rem 0 0">Nothing in this range.</p>
@@ -307,7 +316,7 @@
         <div class="panel chart-panel">
           <div class="spread">
             <h2 style="margin:0">Cash flow</h2>
-            <a class="btn btn-sm btn-ghost" href="/reports/cashflow">Report</a>
+            <a class="btn btn-sm btn-ghost" href="/reports/cashflow{{template "scope-q" $.PersonalDash.ScopeAccounts}}">Report</a>
           </div>
           {{if $w.ShowChart}}
           <div class="chart-wrap chart-wrap-sm" data-chart>
@@ -323,7 +332,7 @@
         <div class="panel chart-panel">
           <div class="spread">
             <h2 style="margin:0">Category spend</h2>
-            <a class="btn btn-sm btn-ghost" href="/explore">Details</a>
+            <a class="btn btn-sm btn-ghost" href="/explore{{template "scope-q" $.PersonalDash.ScopeAccounts}}">Details</a>
           </div>
           {{if $w.ShowChart}}
           <div class="chart-wrap chart-wrap-sm" data-chart>
@@ -400,3 +409,7 @@
 </body>
 </html>
 {{end}}
+
+{{define "scope-q"}}{{with .}}?{{range $i, $id := .}}{{if $i}}&{{end}}account={{$id}}{{end}}{{end}}{{end}}
+
+{{define "household-badge"}}<span class="chip tiny" title="Budgets, left to spend, and insights always cover the whole household">Household</span>{{end}}

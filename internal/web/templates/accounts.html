@@ -106,6 +106,13 @@
       <input id="anchor_date" name="anchor_date" type="date" required
              value="{{if .Account}}{{.Account.AnchorDate}}{{else if .Form.AnchorDate}}{{.Form.AnchorDate}}{{else}}{{today}}{{end}}">
     </div>
+    <div class="field">
+      <label for="transfer_aliases">Transfer aliases</label>
+      <input id="transfer_aliases" name="transfer_aliases" autocomplete="off"
+             value="{{if .Account}}{{.Account.TransferAliases}}{{else}}{{.Form.TransferAliases}}{{end}}"
+             placeholder="BARCLAYCARD, 2123">
+      <p class="tiny muted">Comma-separated text that appears in <em>other</em> accounts' bank descriptions when money moves to or from this account (a card issuer, last 4 digits, “SAV”). Used to match transfers.</p>
+    </div>
     <button class="btn btn-primary btn-block" type="submit">Save account</button>
   </form>
 </div>

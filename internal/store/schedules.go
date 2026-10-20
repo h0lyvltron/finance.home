@@ -369,7 +369,7 @@ func abs64(v int64) int64 {
 func (s *Store) ListScheduleInstances(from, to string) ([]models.ScheduleInstance, error) {
 	rows, err := s.DB.Query(`
 		SELECT i.id, i.template_id, t.name, COALESCE(t.payee_name,''), i.due_date, i.expected_amount,
-			i.status, i.matched_tx_id, t.kind, COALESCE(c.name,''), COALESCE(a.name,'')
+			i.status, i.matched_tx_id, t.kind, COALESCE(c.name,''), COALESCE(a.name,''), t.account_id
 		FROM schedule_instances i
 		JOIN schedule_templates t ON t.id = i.template_id
 		LEFT JOIN categories c ON c.id = t.category_id
@@ -384,15 +384,19 @@ func (s *Store) ListScheduleInstances(from, to string) ([]models.ScheduleInstanc
 	var out []models.ScheduleInstance
 	for rows.Next() {
 		var inst models.ScheduleInstance
-		var matched sql.NullInt64
+		var matched, acct sql.NullInt64
 		if err := rows.Scan(&inst.ID, &inst.TemplateID, &inst.TemplateName, &inst.PayeeName,
 			&inst.DueDate, &inst.ExpectedAmount, &inst.Status, &matched, &inst.Kind,
-			&inst.CategoryName, &inst.AccountName); err != nil {
+			&inst.CategoryName, &inst.AccountName, &acct); err != nil {
 			return nil, err
 		}
 		if matched.Valid {
 			v := matched.Int64
 			inst.MatchedTxID = &v
+		}
+		if acct.Valid {
+			v := acct.Int64
+			inst.AccountID = &v
 		}
 		d1, _ := time.Parse("2006-01-02", today)
 		d2, _ := time.Parse("2006-01-02", inst.DueDate)

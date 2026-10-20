@@ -30,6 +30,9 @@ type Account struct {
 	DisplayOrder  int
 	Archived      bool
 	Balance       int64 // computed
+	// TransferAliases is comma-separated text identifying this account in
+	// other accounts' bank descriptions.
+	TransferAliases string
 }
 
 func (a Account) IsLiability() bool {
@@ -240,6 +243,7 @@ type ScheduleInstance struct {
 	MatchedTxID    *int64
 	Kind           string
 	CategoryName   string
+	AccountID      *int64
 	AccountName    string
 	DaysUntil      int
 }
@@ -396,6 +400,7 @@ type DashboardLayout struct {
 	ID          int64
 	PersonID    *int64 // nil = household default template
 	RangePreset string // this_month | last_30 | ytd | last_12
+	ViewScope   string // household | a | b
 	CreatedAt   string
 	UpdatedAt   string
 }

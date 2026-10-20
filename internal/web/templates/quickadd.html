@@ -8,20 +8,22 @@
     <button class="btn btn-sm btn-ghost" type="button" data-on:click="$quickAddOpen = false">Close</button>
   </div>
 
-  <form class="stack" id="qa-form" method="post" action="/transactions/quick"
+  <div class="row" style="margin-bottom:.75rem">
+    <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'expense'"
+            data-class:btn-primary="$qaKind === 'expense'">Spend</button>
+    <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'income'"
+            data-class:btn-primary="$qaKind === 'income'">Income</button>
+    <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'transfer'"
+            data-class:btn-primary="$qaKind === 'transfer'">Transfer</button>
+  </div>
+
+  <form class="stack" id="qa-form" method="post" action="/transactions/quick" data-show="$qaKind !== 'transfer'"
         data-on:submit="@post('/transactions/quick', {contentType: 'form'})">
     {{template "csrf" .}}
     <input type="hidden" name="kind" data-attr:value="$qaKind" value="expense">
     <input type="hidden" name="date" data-attr:value="$qaDate" value="{{today}}">
     <input type="hidden" name="and_another" id="qa-and-another" value="0">
     <input type="hidden" name="client_key" id="qa-client-key" value="">
-
-    <div class="row">
-      <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'expense'"
-              data-class:btn-primary="$qaKind === 'expense'">Spend</button>
-      <button type="button" class="btn btn-sm" data-on:click="$qaKind = 'income'"
-              data-class:btn-primary="$qaKind === 'income'">Income</button>
-    </div>
 
     <div class="field">
       <label for="qa-amount">Amount</label>
@@ -97,6 +99,59 @@
     <div id="qa-error"></div>
     <div id="qa-offline" class="tiny muted" hidden></div>
   </form>
+
+  <div data-show="$qaKind === 'transfer'" style="display:none">
+    {{template "transfer-fields" .}}
+  </div>
 </aside>
 <script src="/static/js/offline-queue.js" defer></script>
+{{end}}
+
+{{/* Transfer form shared by the quick-add sheet and /transfers/new. Posts over
+     Datastar to /transfers/quick; without JS it falls back to POST /transfers. */}}
+{{define "transfer-fields"}}
+<form class="stack" id="qx-form" method="post" action="/transfers" data-transfer-form data-currency="{{.Currency}}"
+      data-on:submit="@post('/transfers/quick', {contentType: 'form'})">
+  {{template "csrf" .}}
+  <p class="tiny muted" style="margin:0">Moves money between two of your accounts as a linked pair, so it never counts as spending or income.
+    Paying a card or loan from checking goes here too.</p>
+
+  <div class="field">
+    <label for="qx-from">From</label>
+    <select id="qx-from" name="from_account_id" required>
+      <option value="">Select…</option>
+      {{range .Accounts}}<option value="{{.ID}}" data-name="{{.Name}}" data-type="{{.Type}}" data-balance="{{.Balance}}">{{.Name}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label for="qx-to">To</label>
+    <select id="qx-to" name="to_account_id" required>
+      <option value="">Select…</option>
+      {{range .Accounts}}<option value="{{.ID}}" data-name="{{.Name}}" data-type="{{.Type}}" data-balance="{{.Balance}}">{{.Name}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label for="qx-amount">Amount</label>
+    <input class="amount-input" id="qx-amount" name="amount" inputmode="decimal" required placeholder="0.00" autocomplete="off">
+  </div>
+  <div class="field" data-interest-field hidden>
+    <label for="qx-interest">Of which interest <span class="faint">(optional)</span></label>
+    <input id="qx-interest" name="interest" inputmode="decimal" placeholder="0.00" autocomplete="off">
+    <p class="tiny muted">From the statement. The full payment moves as the transfer; the interest is recorded as a Loan interest expense on the loan or card, so what you owe drops by the principal only.</p>
+  </div>
+  <div class="field">
+    <label for="qx-date">Date</label>
+    <input id="qx-date" name="date" type="date" required value="{{today}}">
+  </div>
+  <div class="field">
+    <label for="qx-notes">Notes</label>
+    <input id="qx-notes" name="notes" placeholder="Optional">
+  </div>
+
+  <div class="transfer-preview" data-transfer-preview hidden aria-live="polite"></div>
+
+  <button class="btn btn-primary btn-block" type="submit">Move money</button>
+  <div id="qx-error">{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}</div>
+</form>
+<script src="/static/js/transfer.js" defer></script>
 {{end}}

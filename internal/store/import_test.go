@@ -447,6 +447,15 @@ func TestTransferPairsUseCounterpartOnce(t *testing.T) {
 	if err != nil || tx.TransferID == nil {
 		t.Fatalf("checking payment not linked: %+v err=%v", tx, err)
 	}
+	var splitKind string
+	var splitCount int
+	if err := s.DB.QueryRow(`SELECT COUNT(1), MAX(c.kind) FROM transaction_splits sp
+		JOIN categories c ON c.id = sp.category_id WHERE sp.transaction_id=?`, payment).Scan(&splitCount, &splitKind); err != nil {
+		t.Fatal(err)
+	}
+	if splitCount != 1 || splitKind != "transfer" {
+		t.Fatalf("paired payment keeps stale split: count=%d kind=%s", splitCount, splitKind)
+	}
 	if _, err := s.CommitImport(batchID, 1); err == nil {
 		t.Fatal("second commit of the same batch should fail")
 	}

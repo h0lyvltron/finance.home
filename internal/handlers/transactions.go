@@ -184,7 +184,11 @@ func (a *App) undo(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 		_ = sse.ExecuteScript(`location.reload()`)
 		return
 	}
-	http.Redirect(w, r, "/transactions", http.StatusSeeOther)
+	back := r.FormValue("return")
+	if !strings.HasPrefix(back, "/") || strings.HasPrefix(back, "//") || strings.HasPrefix(back, "/\\") {
+		back = "/transactions"
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 func (a *App) transferNew(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
@@ -193,33 +197,82 @@ func (a *App) transferNew(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 	a.Render.RenderHTTP(w, "transfer-form", d)
 }
 
+func parseTransferForm(r *http.Request, personID int64) (store.TransferInput, error) {
+	in := store.TransferInput{
+		TransactionDate: r.FormValue("date"),
+		Notes:           r.FormValue("notes"),
+		Person:          r.FormValue("person"),
+		CreatedBy:       personID,
+	}
+	in.FromAccountID, _ = strconv.ParseInt(r.FormValue("from_account_id"), 10, 64)
+	in.ToAccountID, _ = strconv.ParseInt(r.FormValue("to_account_id"), 10, 64)
+	if in.FromAccountID == 0 || in.ToAccountID == 0 {
+		return in, fmt.Errorf("pick both accounts")
+	}
+	if in.FromAccountID == in.ToAccountID {
+		return in, fmt.Errorf("pick two different accounts")
+	}
+	amt, err := money.ParseDecimal(r.FormValue("amount"))
+	if err != nil || amt == 0 {
+		return in, fmt.Errorf("enter an amount")
+	}
+	if amt < 0 {
+		amt = -amt
+	}
+	in.Amount = amt
+	if raw := strings.TrimSpace(r.FormValue("interest")); raw != "" {
+		interest, err := money.ParseDecimal(raw)
+		if err != nil {
+			return in, fmt.Errorf("interest isn't a valid amount")
+		}
+		if interest < 0 {
+			interest = -interest
+		}
+		in.InterestCents = interest
+	}
+	if in.TransactionDate == "" {
+		return in, fmt.Errorf("date is required")
+	}
+	return in, nil
+}
+
 func (a *App) transferCreate(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	_ = r.ParseForm()
 	d := a.base(r, sess)
 	a.withQuickAdd(&d)
-	fromID, _ := strconv.ParseInt(r.FormValue("from_account_id"), 10, 64)
-	toID, _ := strconv.ParseInt(r.FormValue("to_account_id"), 10, 64)
-	amt, err := money.ParseDecimal(r.FormValue("amount"))
-	if err != nil || amt <= 0 {
-		d.Error = "Enter a positive amount."
-		a.Render.RenderHTTP(w, "transfer-form", d)
-		return
+	in, err := parseTransferForm(r, sess.PersonID)
+	if err == nil {
+		_, err = a.Store.CreateTransfer(in)
 	}
-	_, err = a.Store.CreateTransfer(store.TransferInput{
-		FromAccountID:   fromID,
-		ToAccountID:     toID,
-		Amount:          amt,
-		TransactionDate: r.FormValue("date"),
-		Notes:           r.FormValue("notes"),
-		Person:          "shared",
-		CreatedBy:       sess.PersonID,
-	})
 	if err != nil {
-		d.Error = err.Error()
+		d.Error = capitalize(err.Error())
 		a.Render.RenderHTTP(w, "transfer-form", d)
 		return
 	}
 	http.Redirect(w, r, "/transactions", http.StatusSeeOther)
+}
+
+func (a *App) transferQuick(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	_ = r.ParseForm()
+	in, err := parseTransferForm(r, sess.PersonID)
+	if err == nil {
+		_, err = a.Store.CreateTransfer(in)
+	}
+	if !wantsDatastar(r) {
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		http.Redirect(w, r, "/transactions", http.StatusSeeOther)
+		return
+	}
+	sse := datastar.NewSSE(w, r)
+	if err != nil {
+		_ = sse.PatchElements(fmt.Sprintf(`<div id="qx-error" class="alert alert-error">%s</div>`, templateEscape(capitalize(err.Error()))))
+		return
+	}
+	_ = sse.PatchElements(`<div id="qx-error" class="alert alert-ok">Transfer saved.</div>`)
+	_ = sse.ExecuteScript(`window.location.href='/transactions';`)
 }
 
 func (a *App) parseTxForm(r *http.Request, personID int64) (store.TxInput, error) {

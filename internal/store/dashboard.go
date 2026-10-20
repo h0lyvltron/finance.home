@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -163,42 +164,76 @@ func (s *Store) EnsurePersonDashboard(personID int64) (*models.DashboardLayout, 
 	return s.GetLayout(newID)
 }
 
-func (s *Store) GetLayout(id int64) (*models.DashboardLayout, error) {
+const layoutCols = `id, person_id, range_preset, view_scope, created_at, updated_at`
+
+func scanLayout(row interface{ Scan(...any) error }) (*models.DashboardLayout, error) {
 	l := &models.DashboardLayout{}
 	var pid sql.NullInt64
-	err := s.DB.QueryRow(`SELECT id, person_id, range_preset, created_at, updated_at FROM dashboard_layouts WHERE id=?`, id).
-		Scan(&l.ID, &pid, &l.RangePreset, &l.CreatedAt, &l.UpdatedAt)
-	if err != nil {
+	if err := row.Scan(&l.ID, &pid, &l.RangePreset, &l.ViewScope, &l.CreatedAt, &l.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if pid.Valid {
 		v := pid.Int64
 		l.PersonID = &v
 	}
+	l.ViewScope = normalizeViewScope(l.ViewScope)
 	return l, nil
 }
 
+func (s *Store) GetLayout(id int64) (*models.DashboardLayout, error) {
+	return scanLayout(s.DB.QueryRow(`SELECT `+layoutCols+` FROM dashboard_layouts WHERE id=?`, id))
+}
+
 func (s *Store) getLayoutByPerson(personID *int64) (*models.DashboardLayout, error) {
-	l := &models.DashboardLayout{}
-	var pid sql.NullInt64
-	var err error
 	if personID == nil {
-		err = s.DB.QueryRow(`SELECT id, person_id, range_preset, created_at, updated_at
-			FROM dashboard_layouts WHERE person_id IS NULL`).
-			Scan(&l.ID, &pid, &l.RangePreset, &l.CreatedAt, &l.UpdatedAt)
-	} else {
-		err = s.DB.QueryRow(`SELECT id, person_id, range_preset, created_at, updated_at
-			FROM dashboard_layouts WHERE person_id=?`, *personID).
-			Scan(&l.ID, &pid, &l.RangePreset, &l.CreatedAt, &l.UpdatedAt)
+		return scanLayout(s.DB.QueryRow(`SELECT ` + layoutCols + ` FROM dashboard_layouts WHERE person_id IS NULL`))
 	}
+	return scanLayout(s.DB.QueryRow(`SELECT `+layoutCols+` FROM dashboard_layouts WHERE person_id=?`, *personID))
+}
+
+func normalizeViewScope(v string) string {
+	switch v {
+	case "a", "b":
+		return v
+	default:
+		return "household"
+	}
+}
+
+// SetDashboardScope picks whose accounts Home shows: household, a, or b.
+func (s *Store) SetDashboardScope(personID int64, scope string) error {
+	layout, err := s.EnsurePersonDashboard(personID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = s.DB.Exec(`UPDATE dashboard_layouts SET view_scope=?, updated_at=? WHERE id=? AND person_id=?`,
+		normalizeViewScope(scope), now, layout.ID, personID)
+	return err
+}
+
+// ScopeAccountIDs returns the accounts (archived included) a person's view
+// covers: the ones they own plus joint accounts. Household returns nil, meaning
+// every account.
+func (s *Store) ScopeAccountIDs(scope string) (map[int64]bool, error) {
+	scope = normalizeViewScope(scope)
+	if scope == "household" {
+		return nil, nil
+	}
+	rows, err := s.DB.Query(`SELECT id FROM accounts WHERE owner IN (?, 'joint')`, scope)
 	if err != nil {
 		return nil, err
 	}
-	if pid.Valid {
-		v := pid.Int64
-		l.PersonID = &v
+	defer rows.Close()
+	set := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		set[id] = true
 	}
-	return l, nil
+	return set, rows.Err()
 }
 
 func (s *Store) ListWidgets(layoutID int64) ([]models.DashboardWidget, error) {
@@ -349,6 +384,9 @@ type WidgetView struct {
 	ChartJSON    string
 	ShowChart    bool
 	Error        string
+	// HouseholdOnly marks budget-driven widgets that always show the whole
+	// household, even when Home is scoped to one person.
+	HouseholdOnly bool
 }
 
 // PersonalDashboard is the assembled Home for one person.
@@ -361,6 +399,9 @@ type PersonalDashboard struct {
 	RangeTo     string
 	YearMonth   string
 	ReviewCount int
+	// ScopeAccounts lists the accounts drill-down links filter to when Home
+	// is scoped to one person; empty for the household view.
+	ScopeAccounts []int64
 }
 
 // BuildPersonalDashboard ensures a layout exists and fills each widget for the range.
@@ -379,6 +420,23 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 	f := QueryFilter{DatePreset: normalizeRangePreset(layout.RangePreset)}
 	f.ResolveDates(h, now)
 	out.RangeFrom, out.RangeTo = f.DateFrom, f.DateTo
+
+	scoped := layout.ViewScope != "household"
+	scopeSet, err := s.ScopeAccountIDs(layout.ViewScope)
+	if err != nil {
+		return out, err
+	}
+	if scoped {
+		for id := range scopeSet {
+			f.AccountIDs = append(f.AccountIDs, id)
+		}
+		if len(f.AccountIDs) == 0 {
+			f.AccountIDs = []int64{-1} // nobody's accounts: match nothing rather than everything
+		}
+		sort.Slice(f.AccountIDs, func(i, j int) bool { return f.AccountIDs[i] < f.AccountIDs[j] })
+		out.ScopeAccounts = f.AccountIDs
+	}
+	inScope := func(id int64) bool { return !scoped || scopeSet[id] }
 
 	widgets, err := s.ListWidgets(layout.ID)
 	if err != nil {
@@ -422,7 +480,11 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 		if err != nil {
 			return err
 		}
-		accts = a
+		for _, acct := range a {
+			if inScope(acct.ID) {
+				accts = append(accts, acct)
+			}
+		}
 		haveAccts = true
 		return nil
 	}
@@ -449,7 +511,11 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 		if err != nil {
 			return err
 		}
-		goals = g
+		for _, gp := range g {
+			if goalInScope(gp.Goal, scoped, scopeSet) {
+				goals = append(goals, gp)
+			}
+		}
 		haveGoals = true
 		return nil
 	}
@@ -485,12 +551,14 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 		v := WidgetView{DashboardWidget: w}
 		switch w.WidgetType {
 		case WidgetLeftToSpend:
+			v.HouseholdOnly = scoped
 			if err := loadDash(); err != nil {
 				v.Error = err.Error()
 			} else {
 				v.LeftToSpend = dash.LeftToSpend
 			}
 		case WidgetBudgetHealth:
+			v.HouseholdOnly = scoped
 			if err := loadDash(); err != nil {
 				v.Error = err.Error()
 			} else {
@@ -500,22 +568,28 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 			if err := loadDash(); err != nil {
 				v.Error = err.Error()
 			} else {
-				v.Bills = dash.Bills
+				for _, b := range dash.Bills {
+					if b.AccountID == nil || inScope(*b.AccountID) {
+						v.Bills = append(v.Bills, b)
+					}
+				}
 			}
 		case WidgetInsights:
+			v.HouseholdOnly = scoped
 			if err := loadDash(); err != nil {
 				v.Error = err.Error()
 			} else {
 				v.Insights = dash.Insights
 			}
 		case WidgetNetWorth:
-			if err := loadDash(); err != nil {
+			if err := loadAccts(); err != nil {
 				v.Error = err.Error()
 			} else {
-				v.NetWorth = dash.NetWorth
+				for _, a := range accts {
+					v.NetWorth += a.Balance
+				}
+				v.Accounts = accts
 			}
-			_ = loadAccts()
-			v.Accounts = accts
 		case WidgetAccounts:
 			if err := loadAccts(); err != nil {
 				v.Error = err.Error()
@@ -566,6 +640,20 @@ func (s *Store) BuildPersonalDashboard(personID int64, h *models.Household, now 
 		out.Widgets = append(out.Widgets, v)
 	}
 	return out, nil
+}
+
+// goalInScope keeps goals linked to at least one in-scope account, plus goals
+// with no linked accounts (they belong to everyone).
+func goalInScope(g models.Goal, scoped bool, set map[int64]bool) bool {
+	if !scoped || len(g.AccountIDs) == 0 {
+		return true
+	}
+	for _, id := range g.AccountIDs {
+		if set[id] {
+			return true
+		}
+	}
+	return false
 }
 
 func grainForDashboardRange(preset string) string {

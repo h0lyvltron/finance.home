@@ -3,14 +3,26 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"finance.home/internal/models"
 )
 
+const accountCols = `id, name, type, owner, currency, anchor_balance, anchor_date, display_order, archived, transfer_aliases`
+
+func scanAccount(row interface{ Scan(...any) error }, a *models.Account) error {
+	var arch int
+	if err := row.Scan(&a.ID, &a.Name, &a.Type, &a.Owner, &a.Currency, &a.AnchorBalance, &a.AnchorDate,
+		&a.DisplayOrder, &arch, &a.TransferAliases); err != nil {
+		return err
+	}
+	a.Archived = arch == 1
+	return nil
+}
+
 func (s *Store) ListAccounts(includeArchived bool) ([]models.Account, error) {
-	q := `SELECT id, name, type, owner, currency, anchor_balance, anchor_date, display_order, archived
-		FROM accounts`
+	q := `SELECT ` + accountCols + ` FROM accounts`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
 	}
@@ -19,35 +31,34 @@ func (s *Store) ListAccounts(includeArchived bool) ([]models.Account, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []models.Account
 	for rows.Next() {
 		var a models.Account
-		var arch int
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Owner, &a.Currency, &a.AnchorBalance, &a.AnchorDate, &a.DisplayOrder, &arch); err != nil {
+		if err := scanAccount(rows, &a); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		a.Archived = arch == 1
-		bal, err := s.AccountBalance(a.ID)
+		out = append(out, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		bal, err := s.AccountBalance(out[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		a.Balance = bal
-		out = append(out, a)
+		out[i].Balance = bal
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) GetAccount(id int64) (*models.Account, error) {
 	a := &models.Account{}
-	var arch int
-	err := s.DB.QueryRow(`SELECT id, name, type, owner, currency, anchor_balance, anchor_date, display_order, archived
-		FROM accounts WHERE id = ?`, id).
-		Scan(&a.ID, &a.Name, &a.Type, &a.Owner, &a.Currency, &a.AnchorBalance, &a.AnchorDate, &a.DisplayOrder, &arch)
-	if err != nil {
+	if err := scanAccount(s.DB.QueryRow(`SELECT `+accountCols+` FROM accounts WHERE id = ?`, id), a); err != nil {
 		return nil, err
 	}
-	a.Archived = arch == 1
 	bal, err := s.AccountBalance(a.ID)
 	if err != nil {
 		return nil, err
@@ -80,12 +91,28 @@ func (s *Store) AccountBalance(accountID int64) (int64, error) {
 }
 
 type AccountInput struct {
-	Name          string
-	Type          string
-	Owner         string
-	Currency      string
-	AnchorBalance int64
-	AnchorDate    string
+	Name            string
+	Type            string
+	Owner           string
+	Currency        string
+	AnchorBalance   int64
+	AnchorDate      string
+	TransferAliases string
+}
+
+// NormalizeAliases trims and de-duplicates a comma-separated alias list.
+func NormalizeAliases(raw string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[strings.ToUpper(p)] {
+			continue
+		}
+		seen[strings.ToUpper(p)] = true
+		out = append(out, p)
+	}
+	return strings.Join(out, ", ")
 }
 
 func (s *Store) CreateAccount(in AccountInput) (int64, error) {
@@ -97,8 +124,9 @@ func (s *Store) CreateAccount(in AccountInput) (int64, error) {
 	}
 	var maxOrd int
 	_ = s.DB.QueryRow(`SELECT COALESCE(MAX(display_order),0) FROM accounts`).Scan(&maxOrd)
-	res, err := s.DB.Exec(`INSERT INTO accounts(name, type, owner, currency, anchor_balance, anchor_date, display_order)
-		VALUES (?,?,?,?,?,?,?)`, in.Name, in.Type, in.Owner, in.Currency, in.AnchorBalance, in.AnchorDate, maxOrd+1)
+	res, err := s.DB.Exec(`INSERT INTO accounts(name, type, owner, currency, anchor_balance, anchor_date, display_order, transfer_aliases)
+		VALUES (?,?,?,?,?,?,?,?)`, in.Name, in.Type, in.Owner, in.Currency, in.AnchorBalance, in.AnchorDate, maxOrd+1,
+		NormalizeAliases(in.TransferAliases))
 	if err != nil {
 		return 0, err
 	}
@@ -107,8 +135,8 @@ func (s *Store) CreateAccount(in AccountInput) (int64, error) {
 
 func (s *Store) UpdateAccount(id int64, in AccountInput) error {
 	_, err := s.DB.Exec(`UPDATE accounts SET name=?, type=?, owner=?, currency=?, anchor_balance=?, anchor_date=?,
-		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-		in.Name, in.Type, in.Owner, in.Currency, in.AnchorBalance, in.AnchorDate, id)
+		transfer_aliases=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+		in.Name, in.Type, in.Owner, in.Currency, in.AnchorBalance, in.AnchorDate, NormalizeAliases(in.TransferAliases), id)
 	return err
 }
 

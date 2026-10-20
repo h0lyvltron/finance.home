@@ -1,0 +1,210 @@
+{{define "audit-tx"}}<div class="audit-tx">
+  <div><span class="audit-acct">{{.T.AccountName}}</span> <span class="tiny muted">{{.T.Date}}</span></div>
+  <div class="tiny muted audit-payee">{{if .T.Payee}}{{.T.Payee}}{{else}}(no payee){{end}}{{if .T.CategoryName}} · {{.T.CategoryName}}{{end}}</div>
+  <div class="tx-amount {{if lt .T.Amount 0}}neg{{else}}pos{{end}}">{{money .T.Amount .Currency}}</div>
+</div>{{end}}
+
+{{define "transfer-audit"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Transfer check — {{.Household.Name}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body data-signals="{quickAddOpen: false}">
+<div class="app-shell">
+  {{template "nav" .}}
+  {{template "topbar" .}}
+  {{template "flash" .}}
+
+  <h1>Transfer check</h1>
+  <p class="muted">Money moving between your own accounts should show up twice: out of one, into the other, linked as a pair.
+    This page finds pairs that were missed, pairs that look wrong, and loan payments whose interest wasn't recorded.
+    Nothing changes until you press a button, and every fix can be undone for 30 minutes.</p>
+
+  {{with .Audit}}
+  {{if .Empty}}
+  <div class="empty panel"><h2>All transfers check out</h2><p>No missed, suspicious, or one-sided transfers.</p></div>
+  {{else}}
+  <div class="chip-row" style="margin:.75rem 0 1rem">
+    {{if .Missed}}<a class="chip" href="#missed">{{len .Missed}} missed</a>{{end}}
+    {{if .Suspicious}}<a class="chip chip-warn" href="#suspicious">{{len .Suspicious}} suspicious</a>{{end}}
+    {{if .Loans}}<a class="chip" href="#loans">{{len .Loans}} loan payments</a>{{end}}
+    {{if .OneSided}}<a class="chip" href="#one-sided">{{len .OneSided}} one-sided</a>{{end}}
+    {{if .StaleSplits}}<a class="chip" href="#stale">{{.StaleSplits}} stale categories</a>{{end}}
+  </div>
+  {{end}}
+
+  {{if .StaleSplits}}
+  <section class="panel audit-section" id="stale">
+    <div class="spread"><h2>Stale categories on transfers</h2>
+      <form method="post" action="/transfers/audit/normalize">{{template "csrf" $}}<button class="btn btn-sm btn-primary">Clean up {{.StaleSplits}}</button></form>
+    </div>
+    <p class="tiny muted">These linked transfers still carry the category they had before they were paired, so a few reports could count them as spending. Cleaning up files them all under Transfer.</p>
+  </section>
+  {{end}}
+
+  {{if .Missed}}
+  <section class="panel audit-section" id="missed">
+    <div class="spread"><h2>Missed pairs</h2>
+      {{if .HighConfidenceCount}}<form method="post" action="/transfers/audit/link-all">{{template "csrf" $}}<button class="btn btn-sm btn-primary">Link {{.HighConfidenceCount}} confident</button></form>{{end}}
+    </div>
+    <p class="tiny muted">Same amount leaving one account and arriving in another within a week. "Confident" pairs name the other account or use payment wording; check the rest before linking.</p>
+    {{range .Missed}}
+    <div class="audit-item">
+      <div class="audit-pair">
+        {{template "audit-tx" (dict "T" .Out "Currency" $.Currency)}}
+        <div class="audit-arrow" aria-hidden="true">→</div>
+        {{template "audit-tx" (dict "T" .In "Currency" $.Currency)}}
+      </div>
+      <div class="spread">
+        <div class="row tiny">
+          {{if .HighConfidence}}<span class="chip chip-ok">Confident</span>{{else}}<span class="chip">Possible</span>{{end}}
+          {{if .Ambiguous}}<span class="chip chip-warn" title="Another transaction matches almost as well">Ambiguous</span>{{end}}
+        </div>
+        <form method="post" action="/transfers/audit/link">{{template "csrf" $}}
+          <input type="hidden" name="out_id" value="{{.Out.ID}}"><input type="hidden" name="in_id" value="{{.In.ID}}">
+          <button class="btn btn-sm">Link</button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .Suspicious}}
+  <section class="panel audit-section" id="suspicious">
+    <h2>Pairs that look wrong</h2>
+    <p class="tiny muted">These are linked today, but the descriptions don't fit or a better partner exists.</p>
+    {{range .Suspicious}}
+    <div class="audit-item">
+      <div class="audit-pair">
+        {{template "audit-tx" (dict "T" .From "Currency" $.Currency)}}
+        <div class="audit-arrow" aria-hidden="true">→</div>
+        {{template "audit-tx" (dict "T" .To "Currency" $.Currency)}}
+      </div>
+      <p class="tiny"><span class="chip chip-warn">Why</span> {{.Reason}}</p>
+      {{with .Suggest}}
+      <div class="audit-suggest">
+        <div class="tiny muted">Suggested pair</div>
+        <div class="audit-pair">
+          {{template "audit-tx" (dict "T" .A "Currency" $.Currency)}}
+          <div class="audit-arrow" aria-hidden="true">↔</div>
+          {{template "audit-tx" (dict "T" .B "Currency" $.Currency)}}
+        </div>
+      </div>
+      {{end}}
+      <div class="row" style="justify-content:flex-end">
+        <form method="post" action="/transfers/audit/unlink">{{template "csrf" $}}
+          <input type="hidden" name="transfer_id" value="{{.TransferID}}">
+          <button class="btn btn-sm btn-ghost">Unlink</button>
+        </form>
+        {{with .Suggest}}
+        <form method="post" action="/transfers/audit/repair">{{template "csrf" $}}
+          <input type="hidden" name="a_id" value="{{.A.ID}}"><input type="hidden" name="b_id" value="{{.B.ID}}">
+          <button class="btn btn-sm btn-primary">Re-pair as suggested</button>
+        </form>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .Loans}}
+  <section class="panel audit-section" id="loans">
+    <div class="spread"><h2>Loan payments missing interest</h2>
+      {{if .ExactLoanCount}}<form method="post" action="/transfers/audit/loan-all">{{template "csrf" $}}<button class="btn btn-sm btn-primary">Fix {{.ExactLoanCount}} exact</button></form>{{end}}
+    </div>
+    <p class="tiny muted">The loan export records only the principal and notes the interest in the description. Fixing records the full payment as the transfer and adds the interest as a separate Loan interest expense on the loan, so both balances stay where they are.</p>
+    {{range .Loans}}
+    <div class="audit-item">
+      <div class="audit-pair">
+        {{if .Out.ID}}{{template "audit-tx" (dict "T" .Out "Currency" $.Currency)}}{{else}}<div class="audit-tx tiny muted">No matching payment found</div>{{end}}
+        <div class="audit-arrow" aria-hidden="true">→</div>
+        {{template "audit-tx" (dict "T" .Loan "Currency" $.Currency)}}
+      </div>
+      {{if .Exact}}
+      <div class="spread">
+        <span class="tiny">{{moneyAbs .Out.Amount $.Currency}} = {{money .Loan.Amount $.Currency}} principal + {{money .Interest $.Currency}} interest</span>
+        <form method="post" action="/transfers/audit/loan">{{template "csrf" $}}
+          <input type="hidden" name="out_id" value="{{.Out.ID}}"><input type="hidden" name="loan_id" value="{{.Loan.ID}}">
+          <input type="hidden" name="interest" value="{{centsInput .Interest}}">
+          <button class="btn btn-sm">Fix</button>
+        </form>
+      </div>
+      {{else}}
+      <p class="tiny"><span class="chip chip-warn">Check</span> {{.Note}}</p>
+      {{if .Out.ID}}
+      <form method="post" action="/transfers/audit/loan" class="row" style="justify-content:flex-end">{{template "csrf" $}}
+        <input type="hidden" name="out_id" value="{{.Out.ID}}"><input type="hidden" name="loan_id" value="{{.Loan.ID}}">
+        <label class="tiny" for="interest-{{.Loan.ID}}">Interest</label>
+        <input id="interest-{{.Loan.ID}}" name="interest" inputmode="decimal" style="width:7rem" value="{{centsInput .Interest}}">
+        <button class="btn btn-sm">Fix with this interest</button>
+      </form>
+      {{end}}
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if $.OneSidedGroups}}
+  <section class="panel audit-section" id="one-sided">
+    <h2>One-sided transfers</h2>
+    <p class="tiny muted">Marked as transfers or debt payments, but the other side was never imported. Add the matching side to the right account, or send them to review if they aren't transfers.
+      Adding to an account changes its current balance if the dates fall after its starting balance date.</p>
+    {{range $.OneSidedGroups}}
+    <form method="post" action="/transfers/audit/counterparts" class="audit-item">{{template "csrf" $}}
+      <div class="spread"><b>{{.AccountName}}</b><span class="tiny muted">{{len .Rows}} · {{money .Total $.Currency}}</span></div>
+      <div class="audit-rows">
+        {{range .Rows}}
+        <label class="audit-check">
+          <input type="checkbox" name="tx_id" value="{{.ID}}" checked>
+          <span class="tiny">{{.Date}}</span>
+          <span class="tiny muted audit-payee">{{if .Payee}}{{.Payee}}{{else}}(no payee){{end}} · {{.CategoryName}}</span>
+          <span class="tx-amount {{if lt .Amount 0}}neg{{else}}pos{{end}}">{{money .Amount $.Currency}}</span>
+        </label>
+        {{end}}
+      </div>
+      <div class="row" style="justify-content:flex-end;flex-wrap:wrap">
+        {{$sug := .SuggestedAccountID}}
+        <select name="account_id" aria-label="Other account">
+          <option value="">Other account…</option>
+          {{range $.Accounts}}<option value="{{.ID}}"{{if eq .ID $sug}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+        <button class="btn btn-sm btn-primary">Add matching side</button>
+        <button class="btn btn-sm btn-ghost" formaction="/transfers/audit/not-transfer">Not transfers</button>
+      </div>
+    </form>
+    {{end}}
+  </section>
+  {{end}}
+  {{end}}
+
+  <p class="tiny faint" style="margin-top:1.5rem">Tip: add the names your bank uses for an account (like "BARCLAYCARD" or "LOAN 02") under Accounts → Edit → Transfer aliases to improve matching.</p>
+</div>
+
+<div id="toast-region" class="toast-region" aria-live="polite">
+  {{if .Message}}
+  <div class="toast">
+    <span>{{.Message}}</span>
+    {{if .UndoID}}
+    <form method="post" action="/undo">
+      {{template "csrf" .}}
+      <input type="hidden" name="undo_id" value="{{.UndoID}}">
+      <input type="hidden" name="return" value="/transfers/audit?msg=Undone.">
+      <button type="submit">Undo</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+<button class="fab" type="button" aria-label="Quick add" data-on:click="$quickAddOpen = true">+</button>
+{{template "quickadd-sheet" .}}
+</body>
+</html>
+{{end}}

@@ -32,6 +32,15 @@ func (a *App) dashboardSetRange(w http.ResponseWriter, r *http.Request, sess *au
 	http.Redirect(w, r, dashboardReturn(r), http.StatusSeeOther)
 }
 
+func (a *App) dashboardSetScope(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
+	_ = r.ParseForm()
+	if err := a.Store.SetDashboardScope(sess.PersonID, r.FormValue("scope")); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, dashboardReturn(r), http.StatusSeeOther)
+}
+
 func (a *App) dashboardAddWidget(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	_ = r.ParseForm()
 	in := store.AddWidgetInput{

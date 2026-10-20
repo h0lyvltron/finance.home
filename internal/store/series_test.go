@@ -53,7 +53,7 @@ func TestFillCashFlowGapsSkipsFutureAndFillsHoles(t *testing.T) {
 	}
 }
 
-func TestAccountBalanceBeforeAnchorIsZero(t *testing.T) {
+func TestAccountBalanceBeforeAnchorWalksBack(t *testing.T) {
 	s := setupStore(t)
 	id, err := s.CreateAccount(store.AccountInput{
 		Name: "Later", Type: "checking", Owner: "joint",
@@ -66,8 +66,34 @@ func TestAccountBalanceBeforeAnchorIsZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before != 0 {
-		t.Fatalf("before anchor = %d", before)
+	if before != 250000 {
+		t.Fatalf("before anchor with no history = %d", before)
+	}
+	exp := firstExpenseCat(t, s)
+	people, _ := s.People()
+	for _, tx := range []store.TxInput{
+		{AccountID: id, PayeeName: "Old", Amount: -10000, TransactionDate: "2024-05-10", CategoryID: &exp, CreatedBy: people[0].ID},
+		{AccountID: id, PayeeName: "Recent", Amount: -2500, TransactionDate: "2024-05-31", CategoryID: &exp, CreatedBy: people[0].ID},
+	} {
+		if _, err := s.CreateTransaction(tx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		date string
+		want int64
+	}{
+		{"2024-05-31", 250000},
+		{"2024-05-30", 252500},
+		{"2024-05-09", 262500},
+	} {
+		got, err := s.AccountBalanceAsOf(id, c.date)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Fatalf("as of %s = %d, want %d", c.date, got, c.want)
+		}
 	}
 	on, err := s.AccountBalanceAsOf(id, "2024-06-01")
 	if err != nil {

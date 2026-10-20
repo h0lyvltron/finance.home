@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -288,7 +287,6 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 		_ = categoryName
 	}
 
-	// Cross-account transfer pairing: opposite amounts within ±5 days vs existing txs on other accounts
 	if err := suggestTransferPairs(tx, in.BatchID, in.AccountID); err != nil {
 		return err
 	}
@@ -404,25 +402,30 @@ const unlinkedTxSQL = `deleted_at IS NULL AND transfer_id IS NULL
 	AND id NOT IN (SELECT from_tx_id FROM transfers UNION ALL SELECT to_tx_id FROM transfers)`
 
 // suggestTransferPairs pairs staged rows with opposite-amount transactions on
-// other accounts within ±5 days. Closest dates are paired first and each staged
-// row and each existing transaction is used at most once.
+// other accounts when the transfer score is high enough and no runner-up is
+// close. Each staged row and each existing transaction is used at most once.
 func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
-	rows, err := tx.Query(`SELECT id, transaction_date, amount FROM import_staging_rows
+	m, err := loadTransferMatcher(tx)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT id, transaction_date, amount, COALESCE(payee_name,''), COALESCE(notes,''), category_id
+		FROM import_staging_rows
 		WHERE batch_id=? AND exception IS NULL AND action='import' AND amount != 0`, batchID)
 	if err != nil {
 		return err
 	}
-	type st struct {
-		id   int64
-		date string
-		amt  int64
-	}
-	var staging []st
+	var staging []transferSide
 	for rows.Next() {
-		var r st
-		if err := rows.Scan(&r.id, &r.date, &r.amt); err != nil {
+		r := transferSide{AccountID: accountID}
+		var cat sql.NullInt64
+		if err := rows.Scan(&r.TxID, &r.Date, &r.Amount, &r.Payee, &r.Notes, &cat); err != nil {
 			rows.Close()
 			return err
+		}
+		if cat.Valid {
+			v := cat.Int64
+			r.CategoryID = &v
 		}
 		staging = append(staging, r)
 	}
@@ -431,53 +434,47 @@ func suggestTransferPairs(tx *sql.Tx, batchID, accountID int64) error {
 		return err
 	}
 
-	type cand struct {
-		rowID, txID int64
-		dist        float64
-	}
-	var cands []cand
+	var cands []pairCandidate
 	for _, r := range staging {
-		crow, err := tx.Query(`SELECT id, ABS(julianday(transaction_date) - julianday(?)) FROM transactions
-			WHERE account_id != ? AND amount = ? AND `+unlinkedTxSQL+`
-			AND ABS(julianday(transaction_date) - julianday(?)) <= 5`,
-			r.date, accountID, -r.amt, r.date)
+		probe := r
+		probe.TxID = 0
+		others, err := opposingTxs(tx, probe, true)
 		if err != nil {
 			return err
 		}
-		for crow.Next() {
-			c := cand{rowID: r.id}
-			if err := crow.Scan(&c.txID, &c.dist); err != nil {
-				crow.Close()
-				return err
+		for _, o := range others {
+			score, ok := m.score(r, o)
+			if !ok {
+				continue
 			}
-			cands = append(cands, c)
-		}
-		crow.Close()
-		if err := crow.Err(); err != nil {
-			return err
+			days, _ := dayDiff(r.Date, o.Date)
+			cands = append(cands, pairCandidate{Left: r.TxID, Right: o.TxID, Score: score, Days: days})
 		}
 	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].dist != cands[j].dist {
-			return cands[i].dist < cands[j].dist
-		}
-		if cands[i].rowID != cands[j].rowID {
-			return cands[i].rowID < cands[j].rowID
-		}
-		return cands[i].txID > cands[j].txID
-	})
-	usedRow, usedTx := map[int64]bool{}, map[int64]bool{}
-	for _, c := range cands {
-		if usedRow[c.rowID] || usedTx[c.txID] {
+	for _, c := range pickPairs(cands, TransferAutoScore, false) {
+		if c.Ambiguous {
 			continue
 		}
-		usedRow[c.rowID], usedTx[c.txID] = true, true
 		if _, err := tx.Exec(`UPDATE import_staging_rows SET action='transfer_pair', transfer_tx_id=?,
-			match_tx_id=NULL WHERE id=? AND action='import'`, c.txID, c.rowID); err != nil {
+			match_tx_id=NULL WHERE id=? AND action='import'`, c.Right, c.Left); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// setTransferCategoryTx makes txID a plain Transfer with one split for its full amount.
+func setTransferCategoryTx(tx querier, txID, xferCat int64) error {
+	if _, err := tx.Exec(`DELETE FROM transaction_splits WHERE transaction_id=?`, txID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO transaction_splits(transaction_id, category_id, person, amount, display_order)
+		SELECT id, ?, person, amount, 0 FROM transactions WHERE id=?`, xferCat, txID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE transactions SET category_id=?, is_split=0, needs_review=0,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, xferCat, txID)
+	return err
 }
 
 type StagingFilter struct {
@@ -845,9 +842,7 @@ func commitTransferPair(tx *sql.Tx, accountID int64, r models.StagingRow, batchI
 	if _, err := tx.Exec(`UPDATE transactions SET transfer_id=? WHERE id IN (?,?)`, xferID, fromID, toID); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE transactions SET category_id=?, needs_review=0,
-		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, xferCat, otherID)
-	return err
+	return setTransferCategoryTx(tx, otherID, xferCat)
 }
 
 // UndoImportBatch soft-deletes transactions created by the batch and clears merge tags.

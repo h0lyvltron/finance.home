@@ -20,7 +20,8 @@
       {{if .ReviewCount}}<a class="btn btn-sm btn-ghost" href="/review">Review <span class="nav-badge">{{.ReviewCount}}</span></a>{{end}}
       <a class="btn btn-sm btn-ghost" href="/transactions/export.csv?{{.QueryString}}">Export CSV</a>
       <a class="btn btn-sm btn-ghost" href="/import">Import</a>
-      <a class="btn btn-sm btn-ghost" href="/transfers/new">Transfer</a>
+      <button type="button" class="btn btn-sm btn-ghost" data-on:click="$qaKind = 'transfer'; $quickAddOpen = true">Transfer</button>
+      <a class="btn btn-sm btn-ghost" href="/transfers/audit">Transfer check</a>
       <a class="btn btn-sm btn-ghost" href="/transactions/new">Full form</a>
     </div>
   </div>
@@ -213,41 +214,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Transfer</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
 </head>
 <body>
 <div class="app-shell" style="padding-bottom:2rem">
   <header class="topbar"><a href="/transactions">← Activity</a></header>
   <h1>Transfer</h1>
-  <p class="muted">Moves money between accounts as a linked pair. Excluded from income and expense.</p>
-  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-  <form method="post" action="/transfers" class="panel stack">
-    {{template "csrf" .}}
-    <div class="field">
-      <label for="from_account_id">From</label>
-      <select id="from_account_id" name="from_account_id" required>
-        {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-      </select>
-    </div>
-    <div class="field">
-      <label for="to_account_id">To</label>
-      <select id="to_account_id" name="to_account_id" required>
-        {{range .Accounts}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-      </select>
-    </div>
-    <div class="field">
-      <label for="amount">Amount</label>
-      <input id="amount" name="amount" inputmode="decimal" required placeholder="0.00">
-    </div>
-    <div class="field">
-      <label for="date">Date</label>
-      <input id="date" name="date" type="date" required value="{{today}}">
-    </div>
-    <div class="field">
-      <label for="notes">Notes</label>
-      <input id="notes" name="notes">
-    </div>
-    <button class="btn btn-primary btn-block" type="submit">Move money</button>
-  </form>
+  <div class="panel">{{template "transfer-fields" .}}</div>
 </div>
 </body>
 </html>

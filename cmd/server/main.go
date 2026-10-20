@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"finance.home/internal/config"
@@ -25,7 +26,7 @@ func main() {
 	}
 	defer sqlDB.Close()
 
-	if err := db.Migrate(sqlDB); err != nil {
+	if err := db.MigrateWithBackup(sqlDB, filepath.Join(cfg.DataDir, "backups")); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 

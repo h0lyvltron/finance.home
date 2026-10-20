@@ -140,6 +140,9 @@ type pageData struct {
 	MonthStartDay   int
 	FewerNudges     bool
 	RetentionDays   int
+	// transfer audit
+	Audit          *store.TransferAudit
+	OneSidedGroups []oneSidedGroup
 }
 
 type reconcileResult struct {
@@ -199,6 +202,7 @@ func (a *App) Routes() http.Handler {
 
 	mux.HandleFunc("GET /{$}", a.requireAuth(a.home))
 	mux.HandleFunc("POST /dashboard/range", a.requireAuth(a.csrf(a.dashboardSetRange)))
+	mux.HandleFunc("POST /dashboard/scope", a.requireAuth(a.csrf(a.dashboardSetScope)))
 	mux.HandleFunc("POST /dashboard/widgets", a.requireAuth(a.csrf(a.dashboardAddWidget)))
 	mux.HandleFunc("POST /dashboard/compact", a.requireAuth(a.csrf(a.dashboardCompact)))
 	mux.HandleFunc("POST /dashboard/reset", a.requireAuth(a.csrf(a.dashboardReset)))
@@ -245,6 +249,17 @@ func (a *App) Routes() http.Handler {
 
 	mux.HandleFunc("GET /transfers/new", a.requireAuth(a.transferNew))
 	mux.HandleFunc("POST /transfers", a.requireAuth(a.csrf(a.transferCreate)))
+	mux.HandleFunc("POST /transfers/quick", a.requireAuth(a.csrf(a.transferQuick)))
+	mux.HandleFunc("GET /transfers/audit", a.requireAuth(a.transferAudit))
+	mux.HandleFunc("POST /transfers/audit/link", a.requireAuth(a.csrf(a.transferAuditLink)))
+	mux.HandleFunc("POST /transfers/audit/link-all", a.requireAuth(a.csrf(a.transferAuditLinkAll)))
+	mux.HandleFunc("POST /transfers/audit/unlink", a.requireAuth(a.csrf(a.transferAuditUnlink)))
+	mux.HandleFunc("POST /transfers/audit/repair", a.requireAuth(a.csrf(a.transferAuditRePair)))
+	mux.HandleFunc("POST /transfers/audit/counterparts", a.requireAuth(a.csrf(a.transferAuditCounterparts)))
+	mux.HandleFunc("POST /transfers/audit/not-transfer", a.requireAuth(a.csrf(a.transferAuditNotTransfer)))
+	mux.HandleFunc("POST /transfers/audit/loan", a.requireAuth(a.csrf(a.transferAuditLoan)))
+	mux.HandleFunc("POST /transfers/audit/loan-all", a.requireAuth(a.csrf(a.transferAuditLoanAll)))
+	mux.HandleFunc("POST /transfers/audit/normalize", a.requireAuth(a.csrf(a.transferAuditNormalize)))
 
 	mux.HandleFunc("POST /undo", a.requireAuth(a.csrf(a.undo)))
 

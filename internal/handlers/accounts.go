@@ -94,7 +94,7 @@ func (a *App) accountEdit(w http.ResponseWriter, r *http.Request, sess *auth.Ses
 	}
 	n, _ := a.Store.CountTxBeforeAnchor(id, acct.AnchorDate)
 	if n > 0 {
-		d.Warn = fmt.Sprintf("%d transaction(s) exist before the anchor date — they are excluded from the balance.", n)
+		d.Warn = fmt.Sprintf("%d transaction(s) exist before the anchor date — they don't change the current balance but are used to rebuild balance history.", n)
 	}
 	a.Render.RenderHTTP(w, "account-form", d)
 }
@@ -138,12 +138,13 @@ func parseAccountForm(r *http.Request) (store.AccountInput, error) {
 		bal = -bal
 	}
 	return store.AccountInput{
-		Name:          strings.TrimSpace(r.FormValue("name")),
-		Type:          typ,
-		Owner:         r.FormValue("owner"),
-		Currency:      "USD",
-		AnchorBalance: bal,
-		AnchorDate:    r.FormValue("anchor_date"),
+		Name:            strings.TrimSpace(r.FormValue("name")),
+		Type:            typ,
+		Owner:           r.FormValue("owner"),
+		Currency:        "USD",
+		AnchorBalance:   bal,
+		AnchorDate:      r.FormValue("anchor_date"),
+		TransferAliases: r.FormValue("transfer_aliases"),
 	}, nil
 }
 

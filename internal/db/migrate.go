@@ -4,9 +4,14 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
+	"log"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed migrations/*.sql
@@ -14,6 +19,25 @@ var MigrationFS embed.FS
 
 // Migrate applies versioned SQL files embedded in this package.
 func Migrate(db *sql.DB) error {
+	return MigrateWithBackup(db, "")
+}
+
+// MigrateWithBackup applies pending migrations, first snapshotting an existing
+// database into backupDir. A failed snapshot stops before anything changes.
+func MigrateWithBackup(db *sql.DB, backupDir string) error {
+	sub, err := fs.Sub(MigrationFS, "migrations")
+	if err != nil {
+		return err
+	}
+	return migrateFS(db, sub, backupDir)
+}
+
+type migration struct {
+	version int
+	name    string
+}
+
+func migrateFS(db *sql.DB, fsys fs.FS, backupDir string) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -21,7 +45,7 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 
-	entries, err := MigrationFS.ReadDir("migrations")
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return fmt.Errorf("read migrations: %w", err)
 	}
@@ -33,6 +57,7 @@ func Migrate(db *sql.DB) error {
 	}
 	sort.Strings(names)
 
+	var pending []migration
 	for _, name := range names {
 		ver, err := parseVersion(name)
 		if err != nil {
@@ -43,13 +68,32 @@ func Migrate(db *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		if exists > 0 {
-			continue
+		if exists == 0 {
+			pending = append(pending, migration{version: ver, name: name})
 		}
-		body, err := MigrationFS.ReadFile("migrations/" + name)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	var applied int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&applied); err != nil {
+		return err
+	}
+	if backupDir != "" && applied > 0 {
+		path, err := snapshot(db, backupDir, pending[0].version)
+		if err != nil {
+			return fmt.Errorf("pre-migration backup: %w", err)
+		}
+		log.Printf("pre-migration backup written to %s", path)
+	}
+
+	for _, m := range pending {
+		body, err := fs.ReadFile(fsys, m.name)
 		if err != nil {
 			return err
 		}
+		name, ver := m.name, m.version
 		tx, err := db.Begin()
 		if err != nil {
 			return err
@@ -65,8 +109,24 @@ func Migrate(db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		log.Printf("migration %s applied", name)
 	}
 	return nil
+}
+
+func snapshot(db *sql.DB, dir string, version int) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("pre-migrate-%03d-%s.db", version, time.Now().UTC().Format("20060102-150405"))
+	path := filepath.Join(dir, name)
+	if _, err := os.Stat(path); err == nil {
+		return "", fmt.Errorf("%s already exists", path)
+	}
+	if _, err := db.Exec(`VACUUM INTO ?`, path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func parseVersion(name string) (int, error) {

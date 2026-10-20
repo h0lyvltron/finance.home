@@ -41,6 +41,10 @@ type TransferInput struct {
 	Notes           string
 	Person          string
 	CreatedBy       int64
+	// InterestCents is the part of a loan or card payment that went to
+	// interest. It is booked as a separate Loan interest expense on the
+	// to-account, so the debt drops by Amount - InterestCents.
+	InterestCents int64
 }
 
 func (s *Store) CreateTransaction(in TxInput) (int64, error) {
@@ -150,6 +154,15 @@ func (s *Store) CreateTransfer(in TransferInput) (int64, error) {
 	if in.FromAccountID == in.ToAccountID {
 		return 0, fmt.Errorf("accounts must differ")
 	}
+	if in.TransactionDate == "" {
+		return 0, fmt.Errorf("date required")
+	}
+	if in.InterestCents < 0 {
+		return 0, fmt.Errorf("interest can't be negative")
+	}
+	if in.InterestCents > in.Amount {
+		return 0, fmt.Errorf("interest can't be more than the payment")
+	}
 	if in.Person == "" {
 		in.Person = "shared"
 	}
@@ -159,6 +172,21 @@ func (s *Store) CreateTransfer(in TransferInput) (int64, error) {
 	}
 	defer tx.Rollback()
 
+	var fromName, toName, toType string
+	var fromArchived, toArchived bool
+	if err := tx.QueryRow(`SELECT name, archived FROM accounts WHERE id=?`, in.FromAccountID).Scan(&fromName, &fromArchived); err != nil {
+		return 0, fmt.Errorf("pick the account the money leaves")
+	}
+	if err := tx.QueryRow(`SELECT name, type, archived FROM accounts WHERE id=?`, in.ToAccountID).Scan(&toName, &toType, &toArchived); err != nil {
+		return 0, fmt.Errorf("pick the account the money goes to")
+	}
+	if fromArchived || toArchived {
+		return 0, fmt.Errorf("archived accounts can't take new transfers")
+	}
+	if in.InterestCents > 0 && !isLiabilityType(toType) {
+		return 0, fmt.Errorf("interest only applies to payments into a loan or credit card")
+	}
+
 	xferCat, err := categoryIDByKindNameTx(tx, "transfer", "Transfer")
 	if err != nil {
 		return 0, err
@@ -167,7 +195,7 @@ func (s *Store) CreateTransfer(in TransferInput) (int64, error) {
 	fromRes, err := tx.Exec(`INSERT INTO transactions(
 		account_id, payee_name, notes, amount, transaction_date, person, status, category_id, is_split, created_by, updated_by)
 		VALUES (?,?,?,?,?,?, 'cleared', ?, 0, ?, ?)`,
-		in.FromAccountID, "Transfer", nullStr(in.Notes), -in.Amount, in.TransactionDate, in.Person,
+		in.FromAccountID, "Transfer to "+toName, nullStr(in.Notes), -in.Amount, in.TransactionDate, in.Person,
 		xferCat, in.CreatedBy, in.CreatedBy)
 	if err != nil {
 		return 0, err
@@ -182,7 +210,7 @@ func (s *Store) CreateTransfer(in TransferInput) (int64, error) {
 	toRes, err := tx.Exec(`INSERT INTO transactions(
 		account_id, payee_name, notes, amount, transaction_date, person, status, category_id, is_split, created_by, updated_by)
 		VALUES (?,?,?,?,?,?, 'cleared', ?, 0, ?, ?)`,
-		in.ToAccountID, "Transfer", nullStr(in.Notes), in.Amount, in.TransactionDate, in.Person,
+		in.ToAccountID, "Transfer from "+fromName, nullStr(in.Notes), in.Amount, in.TransactionDate, in.Person,
 		xferCat, in.CreatedBy, in.CreatedBy)
 	if err != nil {
 		return 0, err
@@ -202,6 +230,16 @@ func (s *Store) CreateTransfer(in TransferInput) (int64, error) {
 	_, err = tx.Exec(`UPDATE transactions SET transfer_id=? WHERE id IN (?,?)`, xferID, fromID, toID)
 	if err != nil {
 		return 0, err
+	}
+	if in.InterestCents > 0 {
+		interestCat, err := loanInterestCategoryTx(tx)
+		if err != nil {
+			return 0, err
+		}
+		if _, err := insertInterestTx(tx, in.ToAccountID, in.TransactionDate, in.Person, in.InterestCents,
+			interestCat, in.CreatedBy, sql.NullInt64{}); err != nil {
+			return 0, err
+		}
 	}
 	return xferID, tx.Commit()
 }
@@ -295,8 +333,11 @@ func (s *Store) Undo(undoID string) error {
 		}
 		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
 		return tx.Commit()
-	case "rule_delete", "category_archive", "category_merge", "tag_change", "tag_merge", "tag_archive", "tag_delete":
+	case "rule_delete", "category_archive", "category_merge", "tag_change", "tag_merge", "tag_archive", "tag_delete",
+		"transfer_link", "transfer_unlink":
 		undoFn := map[string]func(*sql.Tx, string) error{
+			"transfer_link":    undoTransferChange,
+			"transfer_unlink":  undoTransferChange,
 			"rule_delete":      undoRuleDelete,
 			"category_archive": undoCategoryArchive,
 			"category_merge":   undoCategoryMerge,
