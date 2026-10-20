@@ -101,8 +101,9 @@ type Transaction struct {
 
 // CategoryRef is a category offered as a one-tap suggestion.
 type CategoryRef struct {
-	ID   int64
-	Name string
+	ID     int64
+	Name   string
+	Reason string // same payee, similar description, similar amount
 }
 
 type UndoOp struct {
@@ -249,13 +250,15 @@ type ScheduleInstance struct {
 }
 
 type CoachingInsight struct {
-	Kind    string // pace|review|bills|positive|goal|spike|card
-	Tone    string // warn|ok|info
-	Title   string
-	Detail  string
-	Href    string
-	Amount  int64 // optional cents for display
-	ShowAmt bool
+	Kind          string // pace|review|bills|positive|goal|spike|card|split
+	Tone          string // warn|ok|info
+	Title         string
+	Detail        string
+	Href          string
+	Amount        int64 // optional cents for display
+	ShowAmt       bool
+	SplitCategory int64  // set for a split suggestion
+	SplitKey      string // payee key, so dismiss hides this pair only
 }
 
 // DraftTransaction is a durable quick-add draft (offline queue / Save draft).

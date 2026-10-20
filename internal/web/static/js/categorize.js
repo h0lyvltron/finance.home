@@ -140,6 +140,7 @@
     if (c.color) b.style.setProperty('--cat-color', c.color);
     b.dataset.id = c.id;
     b.dataset.search = ((c.parent || '') + ' ' + c.name).toLowerCase();
+    if (c.reason) b.title = c.reason;
     if (String(c.id) === String(current)) b.classList.add('is-current');
     return b;
   }
@@ -462,6 +463,7 @@
         ids: idsOf(btn).join(' '),
         category_id: btn.dataset.category,
         match: btn.dataset.key || '',
+        similar: btn.dataset.similar === '1' ? '1' : '',
         remember: btn.dataset.remember === '1' ? '1' : '',
       });
       res.remember = btn.dataset.remember === '1';

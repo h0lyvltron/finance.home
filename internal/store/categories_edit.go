@@ -21,6 +21,7 @@ type CategoryView struct {
 	Total    int64 // their signed sum
 	Rules    int   // payee rules that file into it
 	Children []CategoryView
+	Splits   []SplitSuggestion
 }
 
 // TreeCount includes subcategories.

@@ -31,6 +31,30 @@ func TestKey(t *testing.T) {
 	}
 }
 
+func TestSimilar(t *testing.T) {
+	if !Similar("SP HUBMAN AND CHUBGI", "SP HUBMAN AND CHUBGIRL") {
+		t.Fatal("truncated hubman should match the full name")
+	}
+	if !Similar("WL *STEAM PURCHASE", "STEAMGAMES.COM 4259522") {
+		t.Fatal("steam purchase and steamgames should match")
+	}
+	if Similar("AMAZON MKTPL*5151", "AMAZON MARK* 577") {
+		t.Fatal("amazon marketplace and amazon mark are different merchants")
+	}
+	if Similar("COSTCO WHSE #0123", "COSTCO GAS") {
+		t.Fatal("costco warehouse and costco gas should stay apart")
+	}
+	if Similar("ANDERSONS", "TRANSFER PAYPAL") {
+		t.Fatal("unrelated payees")
+	}
+	if TitleName("APPLE.COM/BILL") != "Apple" {
+		t.Fatalf("title=%q", TitleName("APPLE.COM/BILL"))
+	}
+	if TitleName("WHATNOT") != "Whatnot" || TitleName("SP HUBMAN AND CHUBGIRL") != "Hubman" {
+		t.Fatalf("titles %q %q", TitleName("WHATNOT"), TitleName("SP HUBMAN AND CHUBGIRL"))
+	}
+}
+
 func TestMatches(t *testing.T) {
 	if !Matches("Purchase VENMO *ADD FUNDS , 7700", "purchase  venmo") {
 		t.Error("expected case/space-insensitive match")

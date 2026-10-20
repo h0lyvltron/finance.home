@@ -201,6 +201,21 @@ func (a *App) importPreview(w http.ResponseWriter, r *http.Request, sess *auth.S
 	a.withQuickAdd(&d)
 	d.Batch = b
 	d.StagingRows = rows
+	groups := store.GroupStaging(rows)
+	acct := int64(0)
+	if b.AccountID != nil {
+		acct = *b.AccountID
+	}
+	if sg, err := a.Store.NewSuggester(); err == nil {
+		for i := range groups {
+			if len(groups[i].Rows) == 0 {
+				continue
+			}
+			first := groups[i].Rows[0]
+			groups[i].Suggest = sg.For(first.PayeeName, first.Amount, acct)
+		}
+	}
+	d.StagingGroups = groups
 	d.Page = page
 	d.Total = total
 	d.PageSize = 25

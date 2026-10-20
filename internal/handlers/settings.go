@@ -118,7 +118,14 @@ func (a *App) coachingSnooze(w http.ResponseWriter, r *http.Request, sess *auth.
 func (a *App) coachingDismiss(w http.ResponseWriter, r *http.Request, sess *auth.Session) {
 	_ = r.ParseForm()
 	kind := r.FormValue("kind")
-	if err := a.Store.DismissCoaching(sess.PersonID, kind); err != nil {
+	var err error
+	if kind == "split" && r.FormValue("payee_key") != "" {
+		catID, _ := strconv.ParseInt(r.FormValue("category_id"), 10, 64)
+		err = a.Store.DismissSplitPair(sess.PersonID, catID, r.FormValue("payee_key"))
+	} else {
+		err = a.Store.DismissCoaching(sess.PersonID, kind)
+	}
+	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}

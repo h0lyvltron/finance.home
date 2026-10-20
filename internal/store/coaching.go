@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"finance.home/internal/models"
@@ -98,6 +99,10 @@ func (s *Store) HomeInsightsFor(h *models.Household, now time.Time, max int, per
 			warn = append(warn, *card)
 		}
 	}
+	var split *models.CoachingInsight
+	if !suppressed("split") && (h == nil || !h.FewerNudges) {
+		split = s.SplitInsight(personID)
+	}
 
 	if !suppressed("positive") {
 		positive = s.PositiveBudgetInsight(ym)
@@ -130,6 +135,9 @@ func (s *Store) HomeInsightsFor(h *models.Household, now time.Time, max int, per
 	if positive != nil {
 		room = max - 1
 	}
+	if split != nil {
+		room--
+	}
 	if room < 0 {
 		room = 0
 	}
@@ -140,6 +148,9 @@ func (s *Store) HomeInsightsFor(h *models.Household, now time.Time, max int, per
 		}
 		out = append(out, w)
 	}
+	if split != nil {
+		out = append(out, *split)
+	}
 	if positive != nil {
 		out = append(out, *positive)
 	}
@@ -147,6 +158,24 @@ func (s *Store) HomeInsightsFor(h *models.Household, now time.Time, max int, per
 		out = out[:max]
 	}
 	return out, nil
+}
+
+// SplitInsight points at the largest payee hiding inside a crowded category.
+func (s *Store) SplitInsight(personID int64) *models.CoachingInsight {
+	list, err := s.SplitSuggestions(personID)
+	if err != nil || len(list) == 0 {
+		return nil
+	}
+	best := list[0]
+	return &models.CoachingInsight{
+		Kind:          "split",
+		Tone:          "info",
+		Title:         best.CategoryName + " is mostly " + best.Name,
+		Detail:        best.Detail(),
+		Href:          "/categories#cat-" + strconv.FormatInt(best.CategoryID, 10),
+		SplitCategory: best.CategoryID,
+		SplitKey:      best.PayeeKey,
+	}
 }
 
 func plural(n int) string {

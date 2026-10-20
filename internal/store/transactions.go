@@ -334,10 +334,12 @@ func (s *Store) Undo(undoID string) error {
 		_, _ = tx.Exec(`DELETE FROM undo_ops WHERE id=?`, undoID)
 		return tx.Commit()
 	case "rule_delete", "category_archive", "category_merge", "tag_change", "tag_merge", "tag_archive", "tag_delete",
-		"transfer_link", "transfer_unlink":
+		"transfer_link", "transfer_unlink", "transfer_repair", "category_split":
 		undoFn := map[string]func(*sql.Tx, string) error{
 			"transfer_link":    undoTransferChange,
 			"transfer_unlink":  undoTransferChange,
+			"transfer_repair":  undoTransferRepair,
+			"category_split":   undoCategorySplit,
 			"rule_delete":      undoRuleDelete,
 			"category_archive": undoCategoryArchive,
 			"category_merge":   undoCategoryMerge,

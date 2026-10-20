@@ -229,6 +229,7 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 		var ruleName, person, rename, tags, categoryName string
 		person = "shared"
 		exception := pr.Error
+		autoFile := false
 
 		if pr.Error == "" {
 			if rule := MatchPayeeRule(rules, pr.Payee, pr.Notes, pr.Amount, in.AccountID); rule != nil {
@@ -245,9 +246,14 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 					rename = rule.RenamePayee
 				}
 				tags = rule.SetTags
-			} else if u := sg.Usual(pr.Payee); u != nil {
-				catID = sql.NullInt64{Int64: u.ID, Valid: true}
-				ruleName = UsualCategoryLabel
+			} else if ref, auto := sg.classify(pr.Payee, pr.Amount); ref != nil {
+				catID = sql.NullInt64{Int64: ref.ID, Valid: true}
+				if auto {
+					ruleName = UsualCategoryLabel
+					autoFile = true
+				} else {
+					ruleName = SuggestedCategoryLabel
+				}
 			}
 			// Duplicate advisory
 			if dupID, summary, ok := findFingerprintTx(tx, fp, in.AccountID); ok {
@@ -263,10 +269,10 @@ func (s *Store) MapAndStage(in MapBatchInput) error {
 					action = "merge"
 				}
 			}
-			if !catID.Valid {
-				needsReview = 1
-			} else if action == "import" {
-				needsReview = 1 // imported/rule-applied still go to review until confirmed
+			// A confident usual category skips the review queue. Rules and
+			// weaker suggestions still wait for a person to confirm them.
+			if action == "import" && autoFile {
+				needsReview = 0
 			}
 		} else {
 			action = "skip"
